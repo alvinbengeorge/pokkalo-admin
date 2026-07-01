@@ -20,6 +20,8 @@ export async function POST(request: Request) {
       total,
       guideStaff,
       assistStaff,
+      customPickupPrice,
+      customFoodPrice,
     } = body;
 
     // Simple validation
@@ -56,6 +58,8 @@ export async function POST(request: Request) {
       total: Number(total) || 0,
       guideStaff,
       assistStaff,
+      customPickupPrice: Number(customPickupPrice) || 0,
+      customFoodPrice: Number(customFoodPrice) || 0,
       createdAt: new Date(),
     };
 

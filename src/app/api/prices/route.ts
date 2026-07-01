@@ -13,8 +13,6 @@ const DEFAULT_PRICES = {
     'bioluminescence-kayaking': 2200,
   },
   addons: {
-    'pickup-drop': 500,
-    'food': 300,
     'refreshment': 150,
   }
 };
