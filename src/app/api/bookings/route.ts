@@ -25,6 +25,11 @@ export async function POST(request: Request) {
       customPickupPrice,
       customFoodPrice,
       customRefreshmentPrice,
+      promoterUrl,
+      promotionFees,
+      guestRemarks,
+      serviceRemarks,
+      staffRemarks,
     } = body;
 
     // Simple validation
@@ -43,6 +48,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Require promoterUrl for promotion
+    if (partner === 'Promotion' && !promoterUrl?.trim()) {
+      return NextResponse.json(
+        { error: 'Promoter URL is required when Partner Type is Promotion' },
+        { status: 400 }
+      );
+    }
+
     if (!services || services.length === 0) {
       return NextResponse.json(
         { error: 'At least one service type must be selected' },
@@ -50,13 +63,18 @@ export async function POST(request: Request) {
       );
     }
 
+    // Force walk-in commission to 0
+    const finalCommission = partner === 'Walk-In' ? 0 : (Number(commission) || 0);
+
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB || 'kayak_club');
 
     const booking = {
       entryUser,
       partner,
-      partnerName: partnerName || '',
+      partnerName: (partner === 'Partner' || partner === 'Broker') ? (partnerName || '') : '',
+      promoterUrl: partner === 'Promotion' ? (promoterUrl || '') : '',
+      promotionFees: partner === 'Promotion' ? (Number(promotionFees) || 0) : 0,
       name,
       mob,
       pax: Number(pax),
@@ -67,13 +85,16 @@ export async function POST(request: Request) {
       discount: Number(discount) || 0,
       extraCharges: Number(extraCharges) || 0,
       balance: Number(balance) || 0,
-      commission: Number(commission) || 0,
+      commission: finalCommission,
       total: Number(total) || 0,
       guideStaff,
       assistStaff,
       customPickupPrice: Number(customPickupPrice) || 0,
       customFoodPrice: Number(customFoodPrice) || 0,
       customRefreshmentPrice: Number(customRefreshmentPrice) || 0,
+      guestRemarks: guestRemarks || '',
+      serviceRemarks: serviceRemarks || '',
+      staffRemarks: staffRemarks || '',
       createdAt: new Date(),
     };
 
@@ -85,7 +106,7 @@ export async function POST(request: Request) {
       message: 'Booking submitted successfully!',
     });
   } catch (error: any) {
-    console.error('Error inserting booking:', error);
+    console.error('Submit booking error:', error);
     return NextResponse.json(
       { error: 'Failed to submit booking', details: error.message },
       { status: 500 }
@@ -97,16 +118,17 @@ export async function GET() {
   try {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB || 'kayak_club');
+    
+    // Return newest bookings first
     const bookings = await db
       .collection('bookings')
       .find({})
       .sort({ createdAt: -1 })
-      .limit(50)
       .toArray();
-
+      
     return NextResponse.json(bookings);
   } catch (error: any) {
-    console.error('Error fetching bookings:', error);
+    console.error('Fetch bookings error:', error);
     return NextResponse.json(
       { error: 'Failed to fetch bookings', details: error.message },
       { status: 500 }

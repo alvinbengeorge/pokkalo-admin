@@ -22,11 +22,13 @@ import {
   Trash2,
   TrendingUp,
   Briefcase,
-  Download
+  Download,
+  Link,
+  Tag,
+  MessageSquare
 } from 'lucide-react';
 
-// Configuration definitions without static prices
-const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker'] as const;
+const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker', 'Promotion'] as const;
 type PartnerType = typeof PARTNER_TYPES[number];
 
 const SERVICE_TYPES = [
@@ -50,6 +52,8 @@ interface BookingRecord {
   entryUser: string;
   partner: string;
   partnerName?: string;
+  promoterUrl?: string;
+  promotionFees?: number;
   name: string;
   mob: string;
   pax: number;
@@ -67,6 +71,9 @@ interface BookingRecord {
   customPickupPrice?: number;
   customFoodPrice?: number;
   customRefreshmentPrice?: number;
+  guestRemarks?: string;
+  serviceRemarks?: string;
+  staffRemarks?: string;
   createdAt: string;
 }
 
@@ -90,7 +97,7 @@ export default function BookingPortal() {
   const [authLoading, setAuthLoading] = useState(false);
   const [seedStatus, setSeedStatus] = useState<string | null>(null);
 
-  // Dynamic Prices State (Addons are completely custom now, keeping placeholder)
+  // Dynamic Prices State
   const [prices, setPrices] = useState<{
     services: Record<string, number>;
     addons: Record<string, number>;
@@ -114,6 +121,8 @@ export default function BookingPortal() {
   // Form Fields State (Staff view)
   const [partner, setPartner] = useState<PartnerType>('Walk-In');
   const [partnerName, setPartnerName] = useState('');
+  const [promoterUrl, setPromoterUrl] = useState('');
+  const [promotionFees, setPromotionFees] = useState('');
   const [name, setName] = useState('');
   const [mob, setMob] = useState('');
   const [pax, setPax] = useState('1');
@@ -125,10 +134,15 @@ export default function BookingPortal() {
   const [extraCharges, setExtraCharges] = useState<string>('');
   const [commission, setCommission] = useState<string>('');
 
-  // Custom Pricing Fields for addons (Food, Pickup-drop, and Refreshment)
+  // Custom Pricing Fields for addons
   const [customPickupPrice, setCustomPickupPrice] = useState<string>('');
   const [customFoodPrice, setCustomFoodPrice] = useState<string>('');
   const [customRefreshmentPrice, setCustomRefreshmentPrice] = useState<string>('');
+
+  // Remarks per section
+  const [guestRemarks, setGuestRemarks] = useState('');
+  const [serviceRemarks, setServiceRemarks] = useState('');
+  const [staffRemarks, setStaffRemarks] = useState('');
 
   // Admin Dashboard State
   const [staffList, setStaffList] = useState<StaffUser[]>([]);
@@ -136,7 +150,7 @@ export default function BookingPortal() {
   const [newStaffPassword, setNewStaffPassword] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
 
-  // Admin Customizable Prices Form State (Services only)
+  // Admin Customizable Prices Form State
   const [priceFormServices, setPriceFormServices] = useState<Record<string, number>>({});
 
   // General App State
@@ -210,6 +224,13 @@ export default function BookingPortal() {
       fetchStaffList();
     }
   }, [user, fetchBookings, fetchStaffList]);
+
+  // Force commission to 0 and disable it when Walk-In is selected
+  useEffect(() => {
+    if (partner === 'Walk-In') {
+      setCommission('0');
+    }
+  }, [partner]);
 
   // Combine staff names for selectors
   const staffNamesList = staffList.length > 0 
@@ -375,10 +396,12 @@ export default function BookingPortal() {
       'Pax Count': b.pax,
       'Partner Channel': b.partner,
       'Partner/Broker Name': b.partnerName || 'N/A',
+      'Promoter URL': b.promoterUrl || 'N/A',
+      'Promotion Fees': b.promotionFees || 0,
       'Services selected': b.services.join(', '),
       'Addons selected': b.addons.join(', '),
       'Rate (Base)': b.rate,
-      'Extra Charges': b.extraCharges || 0,
+      'Extra Charges (Isolated)': b.extraCharges || 0,
       'Discount Applied': b.discount || 0,
       'Advance Paid': b.advance,
       'Balance Due': b.balance,
@@ -386,6 +409,9 @@ export default function BookingPortal() {
       'Total Paid': b.total,
       'Guide Roster': b.guideStaff,
       'Assist Roster': b.assistStaff,
+      'Guest Remarks': b.guestRemarks || '',
+      'Service Remarks': b.serviceRemarks || '',
+      'Staff Remarks': b.staffRemarks || '',
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -410,9 +436,16 @@ export default function BookingPortal() {
     setRate((calculatedBase * paxCount).toString());
   }, [selectedServices, pax, user, prices]);
 
-  // Reset name of partner/broker if the channel switches
+  // Reset conditional fields when channel switches
   useEffect(() => {
     if (partner === 'Walk-In') {
+      setPartnerName('');
+      setPromoterUrl('');
+      setPromotionFees('');
+    } else if (partner === 'Partner' || partner === 'Broker') {
+      setPromoterUrl('');
+      setPromotionFees('');
+    } else if (partner === 'Promotion') {
       setPartnerName('');
     }
   }, [partner]);
@@ -420,18 +453,17 @@ export default function BookingPortal() {
   // Financial Calculations
   const rateVal = parseFloat(rate) || 0;
   const advanceVal = parseFloat(advance) || 0;
-  const commissionVal = parseFloat(commission) || 0;
   const discountVal = parseFloat(discount) || 0;
-  const extraChargesVal = parseFloat(extraCharges) || 0;
 
-  // Addon rates calculations (All three are custom inputs typed in staff form)
+  // Addon rates calculations
   const pickupVal = selectedAddons.includes('pickup-drop') ? (parseFloat(customPickupPrice) || 0) : 0;
   const foodVal = selectedAddons.includes('food') ? (parseFloat(customFoodPrice) || 0) : 0;
   const refreshmentVal = selectedAddons.includes('refreshment') ? (parseFloat(customRefreshmentPrice) || 0) : 0;
 
   const addonsTotal = pickupVal + foodVal + refreshmentVal;
 
-  const totalVal = Math.max(0, rateVal + addonsTotal + extraChargesVal - discountVal);
+  // Extra charges isolated entirely (not added to total bill or balance due)
+  const totalVal = Math.max(0, rateVal + addonsTotal - discountVal);
   const balanceVal = Math.max(0, totalVal - advanceVal);
 
   // Revenue analytics for admin
@@ -467,11 +499,16 @@ export default function BookingPortal() {
     setPax('1');
     setPartner('Walk-In');
     setPartnerName('');
+    setPromoterUrl('');
+    setPromotionFees('');
     setSelectedServices([]);
     setSelectedAddons([]);
     setCustomFoodPrice('');
     setCustomPickupPrice('');
     setCustomRefreshmentPrice('');
+    setGuestRemarks('');
+    setServiceRemarks('');
+    setStaffRemarks('');
     setGuideStaff('');
     setAssistStaff('');
     setRate('');
@@ -500,6 +537,11 @@ export default function BookingPortal() {
       return;
     }
 
+    if (partner === 'Promotion' && !promoterUrl.trim()) {
+      showToast('error', 'Please enter the Promoter URL');
+      return;
+    }
+
     if (!guideStaff) {
       showToast('error', 'Please select a Guide Staff');
       return;
@@ -521,6 +563,8 @@ export default function BookingPortal() {
       entryUser: user?.username || 'System',
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? partnerName : '',
+      promoterUrl: partner === 'Promotion' ? promoterUrl : '',
+      promotionFees: partner === 'Promotion' ? (parseFloat(promotionFees) || 0) : 0,
       name,
       mob,
       pax: parseInt(pax) || 1,
@@ -529,15 +573,18 @@ export default function BookingPortal() {
       rate: rateVal,
       advance: advanceVal,
       discount: discountVal,
-      extraCharges: extraChargesVal,
+      extraCharges: parseFloat(extraCharges) || 0,
       balance: balanceVal,
-      commission: commissionVal,
+      commission: partner === 'Walk-In' ? 0 : (parseFloat(commission) || 0),
       total: totalVal,
       guideStaff,
       assistStaff,
       customPickupPrice: selectedAddons.includes('pickup-drop') ? (parseFloat(customPickupPrice) || 0) : 0,
       customFoodPrice: selectedAddons.includes('food') ? (parseFloat(customFoodPrice) || 0) : 0,
       customRefreshmentPrice: selectedAddons.includes('refreshment') ? (parseFloat(customRefreshmentPrice) || 0) : 0,
+      guestRemarks,
+      serviceRemarks,
+      staffRemarks,
     };
 
     try {
@@ -685,13 +732,13 @@ export default function BookingPortal() {
                 {/* Partner Select */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs text-zinc-400 font-medium">Partner Type</label>
-                  <div className="grid grid-cols-3 gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
+                  <div className="grid grid-cols-4 gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
                     {PARTNER_TYPES.map((type) => (
                       <button
                         key={type}
                         type="button"
                         onClick={() => setPartner(type)}
-                        className={`py-2 px-3 text-xs font-semibold rounded-lg transition-all ${
+                        className={`py-2 px-1 text-[10px] font-semibold rounded-lg transition-all ${
                           partner === type 
                             ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10' 
                             : 'text-zinc-400 hover:text-zinc-200'
@@ -717,6 +764,41 @@ export default function BookingPortal() {
                         className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
                         required
                       />
+                    </div>
+                  )}
+
+                  {/* Conditional input: Promotion URL & Fees */}
+                  {partner === 'Promotion' && (
+                    <div className="flex flex-col gap-3 mt-3 animate-in slide-in-from-top-1 duration-150 bg-zinc-950/50 p-2.5 rounded-xl border border-zinc-900">
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="staff-promoter-url" className="text-xs font-semibold text-sky-400 flex items-center gap-1">
+                          <Link size={12} />
+                          <span>Promoter URL</span>
+                        </label>
+                        <input
+                          id="staff-promoter-url"
+                          type="url"
+                          placeholder="https://instagram.com/influencer"
+                          value={promoterUrl}
+                          onChange={(e) => setPromoterUrl(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
+                          required
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="staff-promotion-fees" className="text-xs font-semibold text-sky-400 flex items-center gap-1">
+                          <Tag size={12} />
+                          <span>Promotion Fees (₹)</span>
+                        </label>
+                        <input
+                          id="staff-promotion-fees"
+                          type="number"
+                          placeholder="0"
+                          value={promotionFees}
+                          onChange={(e) => setPromotionFees(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -747,27 +829,52 @@ export default function BookingPortal() {
                       <input
                         id="staff-mob"
                         type="tel"
-                        placeholder="9876543210"
+                        placeholder=""
                         value={mob}
                         onChange={(e) => setMob(e.target.value.replace(/[^0-9+]/g, ''))}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                         required
                       />
                     </div>
                   </div>
 
+                  {/* Pax Counter Stepper */}
                   <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-pax" className="text-xs text-zinc-400 font-medium">Pax (Guests)</label>
-                    <input
-                      id="staff-pax"
-                      type="number"
-                      min="1"
-                      value={pax}
-                      onChange={(e) => setPax(Math.max(1, parseInt(e.target.value) || 1).toString())}
-                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
-                      required
-                    />
+                    <label className="text-xs text-zinc-400 font-medium">Pax (Guests)</label>
+                    <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 rounded-xl p-1 w-full justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setPax(Math.max(1, (parseInt(pax) || 1) - 1).toString())}
+                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold flex items-center justify-center hover:bg-zinc-705 active:scale-95 transition-all text-xs"
+                      >
+                        -
+                      </button>
+                      <span className="text-xs font-black text-white">{pax}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPax(((parseInt(pax) || 1) + 1).toString())}
+                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold flex items-center justify-center hover:bg-zinc-705 active:scale-95 transition-all text-xs"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
+                </div>
+
+                {/* Section Remarks: Guest Details */}
+                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                  <label htmlFor="staff-guest-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                    <MessageSquare size={10} />
+                    <span>Remarks (Guest Details)</span>
+                  </label>
+                  <input
+                    id="staff-guest-remarks"
+                    type="text"
+                    placeholder="Remarks regarding guest profiles..."
+                    value={guestRemarks}
+                    onChange={(e) => setGuestRemarks(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
+                  />
                 </div>
               </div>
 
@@ -785,7 +892,6 @@ export default function BookingPortal() {
                     {SERVICE_TYPES.map((service) => {
                       const isSelected = selectedServices.includes(service.id);
                       const servicePrice = prices.services[service.id] ?? 0;
-                      
                       const displayPriceLabel = servicePrice > 0 ? `₹${servicePrice}` : '';
 
                       return (
@@ -834,7 +940,7 @@ export default function BookingPortal() {
                     })}
                   </div>
 
-                  {/* CUSTOM ADDON PRICING INPUTS (Food, Pickup/Drop, and Refreshment are all custom priced now) */}
+                  {/* CUSTOM ADDON PRICING INPUTS (Food, Pickup/Drop, and Refreshment are all custom priced) */}
                   {selectedAddons.includes('pickup-drop') && (
                     <div className="flex flex-col gap-1.5 mt-2 animate-in slide-in-from-top-1 duration-150">
                       <label htmlFor="staff-pickup-price" className="text-[10px] text-zinc-400 font-medium">Pickup/Drop Total Price (₹)</label>
@@ -878,6 +984,22 @@ export default function BookingPortal() {
                     </div>
                   )}
                 </div>
+
+                {/* Section Remarks: Services */}
+                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                  <label htmlFor="staff-service-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                    <MessageSquare size={10} />
+                    <span>Remarks (Services & Add-ons)</span>
+                  </label>
+                  <input
+                    id="staff-service-remarks"
+                    type="text"
+                    placeholder="Remarks regarding selected packages..."
+                    value={serviceRemarks}
+                    onChange={(e) => setServiceRemarks(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
+                  />
+                </div>
               </div>
 
               {/* Section 2.5: Staff Assignment for Guide and Assist */}
@@ -919,6 +1041,22 @@ export default function BookingPortal() {
                     <option key={name} value={name} />
                   ))}
                 </datalist>
+
+                {/* Section Remarks: Staff Assigned */}
+                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                    <MessageSquare size={10} />
+                    <span>Remarks (Staff Assigned)</span>
+                  </label>
+                  <input
+                    id="staff-assigned-remarks"
+                    type="text"
+                    placeholder="Remarks regarding docking crews..."
+                    value={staffRemarks}
+                    onChange={(e) => setStaffRemarks(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
+                  />
+                </div>
               </div>
 
               {/* Section 3: Payment Details */}
@@ -960,7 +1098,10 @@ export default function BookingPortal() {
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-extra-charges" className="text-xs text-zinc-400 font-medium">Extra Charges</label>
+                    <label htmlFor="staff-extra-charges" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
+                      <span>Extra Charges</span>
+                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">(Isolated)</span>
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
                       <input
@@ -969,7 +1110,7 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={extraCharges}
                         onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors animate-pulse"
                       />
                     </div>
                   </div>
@@ -990,7 +1131,12 @@ export default function BookingPortal() {
                   </div>
 
                   <div className="flex flex-col gap-1.5 col-span-2">
-                    <label htmlFor="staff-commission" className="text-xs text-zinc-400 font-medium">Commission</label>
+                    <label htmlFor="staff-commission" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
+                      <span>Commission</span>
+                      {partner === 'Walk-In' && (
+                        <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(No Walk-In Commission)</span>
+                      )}
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
                       <input
@@ -999,7 +1145,10 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={commission}
                         onChange={(e) => setCommission(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        disabled={partner === 'Walk-In'}
+                        className={`w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors ${
+                          partner === 'Walk-In' ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-rose-500/20' : ''
+                        }`}
                       />
                     </div>
                   </div>
@@ -1022,7 +1171,7 @@ export default function BookingPortal() {
                 <div className="bg-sky-500/10 border border-sky-500/25 rounded-xl p-3 flex justify-between items-center">
                   <div className="flex flex-col">
                     <span className="text-[10px] text-sky-400 font-bold uppercase">Total Bill</span>
-                    <span className="text-[8px] text-zinc-500">Rate + Addons + Extra - Discount</span>
+                    <span className="text-[8px] text-zinc-500">Rate + Addons - Discount</span>
                   </div>
                   <div className="text-lg font-black text-white">
                     ₹{totalVal}
@@ -1048,7 +1197,7 @@ export default function BookingPortal() {
 
             </form>
 
-            {/* Local logs (Export is restricted to Admin Console only) */}
+            {/* Local logs */}
             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
               <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
                 <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">My Recent Logs</span>
@@ -1143,7 +1292,7 @@ export default function BookingPortal() {
               </div>
             </div>
 
-            {/* Dynamic Price Customization Section (Addons are completely custom now; not configurable here) */}
+            {/* Dynamic Price Customization Section */}
             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
                 <DollarSign size={16} className="text-amber-500" />
@@ -1348,7 +1497,7 @@ export default function BookingPortal() {
 
                 {/* Guest Details */}
                 <div className="flex flex-col gap-1 pt-1">
-                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Partner</div>
+                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Channel</div>
                   <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -1360,15 +1509,61 @@ export default function BookingPortal() {
                         <div className="font-semibold text-white">{selectedBookingForDetails.pax} Guests</div>
                       </div>
                     </div>
-                    <div className="border-t border-zinc-850 pt-1.5 mt-1.5">
+                    <div className="border-t border-zinc-855 pt-1.5 mt-1">
                       <div className="text-[9px] text-zinc-500">Partner Channel</div>
                       <div className="font-semibold text-white">
                         {selectedBookingForDetails.partner} 
                         {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
                       </div>
                     </div>
+                    {selectedBookingForDetails.promoterUrl && (
+                      <div className="border-t border-zinc-855 pt-1.5 mt-0.5">
+                        <div className="text-[9px] text-zinc-500">Promoter Source</div>
+                        <a 
+                          href={selectedBookingForDetails.promoterUrl} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="text-[10px] text-sky-400 font-bold hover:underline break-all"
+                        >
+                          {selectedBookingForDetails.promoterUrl}
+                        </a>
+                      </div>
+                    )}
+                    {selectedBookingForDetails.promotionFees !== undefined && selectedBookingForDetails.promotionFees > 0 && (
+                      <div className="flex justify-between border-t border-zinc-855 pt-1 mt-0.5 text-zinc-400">
+                        <span>Promotion Fees</span>
+                        <span className="text-white font-semibold">₹{selectedBookingForDetails.promotionFees}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Section Remarks */}
+                {(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks || selectedBookingForDetails.staffRemarks) && (
+                  <div className="flex flex-col gap-1 pt-1">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Log Section Remarks</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
+                      {selectedBookingForDetails.guestRemarks && (
+                        <div>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Guest Details</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.guestRemarks}"</p>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.serviceRemarks && (
+                        <div className={`${selectedBookingForDetails.guestRemarks ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Services & Addons</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.serviceRemarks}"</p>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.staffRemarks && (
+                        <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Staff Roster</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Staff Assignments */}
                 <div className="flex flex-col gap-1">
@@ -1421,8 +1616,8 @@ export default function BookingPortal() {
                     </div>
                     {selectedBookingForDetails.extraCharges !== undefined && selectedBookingForDetails.extraCharges > 0 && (
                       <div className="flex justify-between text-zinc-400">
-                        <span>Extra Charges</span>
-                        <span className="text-white font-medium">+ ₹{selectedBookingForDetails.extraCharges}</span>
+                        <span>Extra Charges (Isolated)</span>
+                        <span className="text-amber-400 font-bold">₹{selectedBookingForDetails.extraCharges}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-zinc-400">
@@ -1444,7 +1639,7 @@ export default function BookingPortal() {
                       <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
                     </div>
                     <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-850 pt-1 mt-0.5">
-                      <span>Total Bill (incl. Addons & Extras)</span>
+                      <span>Total Bill (incl. Addons)</span>
                       <span>₹{selectedBookingForDetails.total}</span>
                     </div>
                   </div>
@@ -1458,7 +1653,7 @@ export default function BookingPortal() {
 
         {/* Dynamic attribution footer */}
         <footer className="mt-auto pt-8 pb-4 text-center">
-          <p className="text-[9px] text-zinc-650 opacity-40 hover:opacity-100 transition-opacity font-semibold">
+          <p className="text-[9px] text-zinc-655 opacity-40 hover:opacity-100 transition-opacity font-semibold">
             Pokkalo Club &copy; {new Date().getFullYear()} &bull; Made by Alvin Ben George
           </p>
         </footer>
