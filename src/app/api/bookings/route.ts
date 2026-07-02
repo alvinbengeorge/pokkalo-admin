@@ -7,6 +7,7 @@ export async function POST(request: Request) {
     const {
       entryUser,
       partner,
+      partnerName,
       name,
       mob,
       pax,
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
       rate,
       advance,
       discount,
+      extraCharges,
       balance,
       commission,
       total,
@@ -22,12 +24,21 @@ export async function POST(request: Request) {
       assistStaff,
       customPickupPrice,
       customFoodPrice,
+      customRefreshmentPrice,
     } = body;
 
     // Simple validation
     if (!entryUser || !partner || !name || !mob || !pax || !guideStaff || !assistStaff) {
       return NextResponse.json(
         { error: 'Missing required guest/staff details (User, Partner, Name, Mobile, Pax, Guide Staff, Assist Staff)' },
+        { status: 400 }
+      );
+    }
+
+    // Require partnerName for partner/broker
+    if ((partner === 'Partner' || partner === 'Broker') && !partnerName?.trim()) {
+      return NextResponse.json(
+        { error: `Partner Name or Broker Name is required when Partner Type is ${partner}` },
         { status: 400 }
       );
     }
@@ -45,6 +56,7 @@ export async function POST(request: Request) {
     const booking = {
       entryUser,
       partner,
+      partnerName: partnerName || '',
       name,
       mob,
       pax: Number(pax),
@@ -53,6 +65,7 @@ export async function POST(request: Request) {
       rate: Number(rate) || 0,
       advance: Number(advance) || 0,
       discount: Number(discount) || 0,
+      extraCharges: Number(extraCharges) || 0,
       balance: Number(balance) || 0,
       commission: Number(commission) || 0,
       total: Number(total) || 0,
@@ -60,6 +73,7 @@ export async function POST(request: Request) {
       assistStaff,
       customPickupPrice: Number(customPickupPrice) || 0,
       customFoodPrice: Number(customFoodPrice) || 0,
+      customRefreshmentPrice: Number(customRefreshmentPrice) || 0,
       createdAt: new Date(),
     };
 

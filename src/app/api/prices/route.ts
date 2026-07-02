@@ -8,13 +8,10 @@ const DEFAULT_PRICES = {
     'towing': 800,
     'boating': 2000,
     'fishing': 2500,
-    'custom-package': 0,
     'bioluminescence-boating': 1800,
     'bioluminescence-kayaking': 2200,
   },
-  addons: {
-    'refreshment': 150,
-  }
+  addons: {}
 };
 
 export async function GET() {
@@ -30,7 +27,7 @@ export async function GET() {
     
     return NextResponse.json({
       services: config.services || DEFAULT_PRICES.services,
-      addons: config.addons || DEFAULT_PRICES.addons,
+      addons: {},
     });
   } catch (error: any) {
     console.error('Fetch prices error:', error);
@@ -44,11 +41,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { services, addons } = body;
+    const { services } = body;
 
-    if (!services || !addons) {
+    if (!services) {
       return NextResponse.json(
-        { error: 'Missing services or addons configuration' },
+        { error: 'Missing services configuration' },
         { status: 400 }
       );
     }
@@ -61,7 +58,7 @@ export async function POST(request: Request) {
       {
         $set: {
           services,
-          addons,
+          addons: {},
           updatedAt: new Date(),
         }
       },
