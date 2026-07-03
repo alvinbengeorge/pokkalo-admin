@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   User, 
@@ -858,9 +858,13 @@ export default function BookingPortal() {
     min?: number 
   }) => {
     const [inputValue, setInputValue] = useState<string>(value.toString());
+    const inputRef = useRef<HTMLInputElement>(null);
 
-    // Keep local state in sync when value changes externally
+    // Keep local state in sync when value changes externally, unless input is focused
     useEffect(() => {
+      if (document.activeElement === inputRef.current) {
+        return;
+      }
       setInputValue(value.toString());
     }, [value]);
 
@@ -903,6 +907,7 @@ export default function BookingPortal() {
             -
           </button>
           <input
+            ref={inputRef}
             type="number"
             min={min}
             value={inputValue}
