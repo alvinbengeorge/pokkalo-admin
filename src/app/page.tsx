@@ -47,6 +47,14 @@ const ADDONS = [
   { id: 'refreshment', name: 'Refreshment', icon: Coffee },
 ] as const;
 
+interface ServiceRow {
+  serviceId: string;
+  serviceName: string;
+  adults: number;
+  children: number;
+  rate: number;
+}
+
 interface BookingRecord {
   _id: string;
   entryUser: string;
@@ -56,8 +64,9 @@ interface BookingRecord {
   promotionFees?: number;
   name: string;
   mob: string;
-  pax: number;
-  services: string[];
+  adults: number;
+  children: number;
+  services: ServiceRow[];
   addons: string[];
   rate: number;
   advance: number;
@@ -74,6 +83,7 @@ interface BookingRecord {
   guestRemarks?: string;
   serviceRemarks?: string;
   staffRemarks?: string;
+  location: string;
   createdAt: string;
 }
 
@@ -81,6 +91,12 @@ interface StaffUser {
   _id: string;
   username: string;
   role: string;
+  createdAt: string;
+}
+
+interface LocationBranch {
+  _id: string;
+  name: string;
   createdAt: string;
 }
 
@@ -114,6 +130,11 @@ export default function BookingPortal() {
     addons: {}
   });
 
+  // Locations / Branches State
+  const [locationsList, setLocationsList] = useState<LocationBranch[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState('');
+  const [newLocationName, setNewLocationName] = useState('');
+
   // Staff Assignment State
   const [guideStaff, setGuideStaff] = useState('');
   const [assistStaff, setAssistStaff] = useState('');
@@ -125,8 +146,20 @@ export default function BookingPortal() {
   const [promotionFees, setPromotionFees] = useState('');
   const [name, setName] = useState('');
   const [mob, setMob] = useState('');
-  const [pax, setPax] = useState('1');
-  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  
+  // Guest adults / children count
+  const [guestAdults, setGuestAdults] = useState<number>(1);
+  const [guestChildren, setGuestChildren] = useState<number>(0);
+
+  // Dynamic Service rows lists
+  const [serviceRows, setServiceRows] = useState<Array<{
+    serviceId: string;
+    adults: number;
+    children: number;
+  }>>([
+    { serviceId: 'sunrise-kayaking', adults: 1, children: 0 }
+  ]);
+
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
   const [rate, setRate] = useState<string>('');
   const [advance, setAdvance] = useState<string>('');
@@ -174,6 +207,21 @@ export default function BookingPortal() {
     }
   };
 
+  const fetchLocations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/locations');
+      if (res.ok) {
+        const data = await res.json();
+        setLocationsList(data);
+        if (data.length > 0 && !selectedLocation) {
+          setSelectedLocation(data[0].name);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load locations:', err);
+    }
+  }, [selectedLocation]);
+
   const fetchBookings = useCallback(async () => {
     setIsLoadingBookings(true);
     try {
@@ -207,6 +255,7 @@ export default function BookingPortal() {
   // Fetch prices & session on mount
   useEffect(() => {
     fetchPrices();
+    fetchLocations();
     const cachedUser = localStorage.getItem('kayak_auth_user');
     if (cachedUser) {
       try {
@@ -215,15 +264,16 @@ export default function BookingPortal() {
         localStorage.removeItem('kayak_auth_user');
       }
     }
-  }, []);
+  }, [fetchLocations]);
 
   // Sync data depending on logged-in role
   useEffect(() => {
     if (user) {
       fetchBookings();
       fetchStaffList();
+      fetchLocations();
     }
-  }, [user, fetchBookings, fetchStaffList]);
+  }, [user, fetchBookings, fetchStaffList, fetchLocations]);
 
   // Force commission to 0 and disable it when Walk-In is selected
   useEffect(() => {
@@ -380,6 +430,79 @@ export default function BookingPortal() {
     }
   };
 
+  // Admin: Create Location
+  const handleCreateLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLocationName.trim()) {
+      showToast('error', 'Location name is required');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newLocationName.trim() }),
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        showToast('success', data.message || 'Location branch added!');
+        setNewLocationName('');
+        fetchLocations();
+      } else {
+        showToast('error', data.error || 'Failed to create location');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Network error creating location');
+    }
+  };
+
+  // Admin: Delete Location
+  const handleDeleteLocation = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete location branch: "${name}"?`)) return;
+
+    try {
+      const response = await fetch(`/api/locations?id=${id}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        showToast('success', data.message || 'Location branch deleted');
+        fetchLocations();
+      } else {
+        showToast('error', data.error || 'Failed to delete location');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Network error deleting location');
+    }
+  };
+
+  // Admin: Delete Booking Log
+  const handleDeleteBooking = async (id: string, guestName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete the booking log for "${guestName}"?`)) return;
+
+    try {
+      const response = await fetch(`/api/bookings?id=${id}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        showToast('success', data.message || 'Booking entry deleted successfully');
+        fetchBookings();
+      } else {
+        showToast('error', data.error || 'Failed to delete booking entry');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Network error deleting booking registry log');
+    }
+  };
+
   // Excel Exporter (Restricted to Admin console only)
   const handleExportToExcel = () => {
     if (bookings.length === 0) {
@@ -389,16 +512,18 @@ export default function BookingPortal() {
 
     const dataToExport = bookings.map((b) => ({
       'Logged By (Staff)': b.entryUser,
+      'Branch Location': b.location || 'N/A',
       'Date': new Date(b.createdAt).toLocaleDateString(),
       'Time': new Date(b.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
       'Guest Name': b.name,
       'Mobile Number': b.mob,
-      'Pax Count': b.pax,
+      'Adults Count': b.adults,
+      'Children Count': b.children,
       'Partner Channel': b.partner,
       'Partner/Broker Name': b.partnerName || 'N/A',
       'Promoter URL': b.promoterUrl || 'N/A',
       'Promotion Fees': b.promotionFees || 0,
-      'Services selected': b.services.join(', '),
+      'Services Details Summary': b.services.map(s => `${s.serviceName} (A:${s.adults}, C:${s.children})`).join(' | '),
       'Addons selected': b.addons.join(', '),
       'Rate (Base)': b.rate,
       'Extra Charges (Isolated)': b.extraCharges || 0,
@@ -418,23 +543,25 @@ export default function BookingPortal() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Club Bookings");
 
-    XLSX.writeFile(workbook, `Pokkalo_Club_Bookings_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(workbook, `Pokkalo_Kayaking_Club_Bookings_${new Date().toISOString().slice(0, 10)}.xlsx`);
     showToast('success', 'Excel report downloaded successfully!');
   };
 
-  // Automatically update base rate when services change using dynamically loaded rates
+  // Dynamically calculate base rates from selected services list
+  // Child has exactly 50% cost of the base service rate
   useEffect(() => {
     if (user?.role !== 'staff') return;
-    let calculatedBase = 0;
     
-    selectedServices.forEach(srvId => {
-      const servicePrice = prices.services[srvId] ?? 0;
-      calculatedBase += servicePrice;
+    let totalBaseCalculated = 0;
+    serviceRows.forEach(row => {
+      const basePrice = prices.services[row.serviceId] ?? 0;
+      const adultCost = basePrice * row.adults;
+      const childCost = basePrice * row.children * 0.5;
+      totalBaseCalculated += (adultCost + childCost);
     });
 
-    const paxCount = parseInt(pax) || 1;
-    setRate((calculatedBase * paxCount).toString());
-  }, [selectedServices, pax, user, prices]);
+    setRate(totalBaseCalculated.toString());
+  }, [serviceRows, user, prices]);
 
   // Reset conditional fields when channel switches
   useEffect(() => {
@@ -450,6 +577,24 @@ export default function BookingPortal() {
     }
   }, [partner]);
 
+  // Dynamic Service Row Actions
+  const handleAddServiceRow = () => {
+    setServiceRows([...serviceRows, { serviceId: 'sunrise-kayaking', adults: 1, children: 0 }]);
+  };
+
+  const handleRemoveServiceRow = (index: number) => {
+    setServiceRows(serviceRows.filter((_, idx) => idx !== index));
+  };
+
+  const handleServiceRowChange = (index: number, key: 'serviceId' | 'adults' | 'children', val: any) => {
+    const updated = [...serviceRows];
+    updated[index] = {
+      ...updated[index],
+      [key]: val
+    };
+    setServiceRows(updated);
+  };
+
   // Financial Calculations
   const rateVal = parseFloat(rate) || 0;
   const advanceVal = parseFloat(advance) || 0;
@@ -462,7 +607,6 @@ export default function BookingPortal() {
 
   const addonsTotal = pickupVal + foodVal + refreshmentVal;
 
-  // Extra charges isolated entirely (not added to total bill or balance due)
   const totalVal = Math.max(0, rateVal + addonsTotal - discountVal);
   const balanceVal = Math.max(0, totalVal - advanceVal);
 
@@ -481,12 +625,6 @@ export default function BookingPortal() {
   };
 
   // Toggle helpers
-  const toggleService = (id: string) => {
-    setSelectedServices(prev => 
-      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
-    );
-  };
-
   const toggleAddon = (id: string) => {
     setSelectedAddons(prev => 
       prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
@@ -496,12 +634,13 @@ export default function BookingPortal() {
   const resetForm = () => {
     setName('');
     setMob('');
-    setPax('1');
+    setGuestAdults(1);
+    setGuestChildren(0);
     setPartner('Walk-In');
     setPartnerName('');
     setPromoterUrl('');
     setPromotionFees('');
-    setSelectedServices([]);
+    setServiceRows([{ serviceId: 'sunrise-kayaking', adults: 1, children: 0 }]);
     setSelectedAddons([]);
     setCustomFoodPrice('');
     setCustomPickupPrice('');
@@ -516,6 +655,11 @@ export default function BookingPortal() {
     setDiscount('');
     setExtraCharges('');
     setCommission('');
+    if (locationsList.length > 0) {
+      setSelectedLocation(locationsList[0].name);
+    } else {
+      setSelectedLocation('');
+    }
   };
 
   // Submit Booking Form
@@ -529,6 +673,11 @@ export default function BookingPortal() {
 
     if (!mob.trim()) {
       showToast('error', 'Please enter guest mobile number');
+      return;
+    }
+
+    if (!selectedLocation) {
+      showToast('error', 'Please select a branch location');
       return;
     }
 
@@ -552,12 +701,26 @@ export default function BookingPortal() {
       return;
     }
 
-    if (selectedServices.length === 0) {
-      showToast('error', 'Please select at least one service category');
+    if (serviceRows.length === 0) {
+      showToast('error', 'Please add at least one service');
       return;
     }
 
     setIsSubmitting(true);
+
+    // Format selected services array
+    const servicesPayload = serviceRows.map(row => {
+      const originalService = SERVICE_TYPES.find(s => s.id === row.serviceId);
+      const basePrice = prices.services[row.serviceId] ?? 0;
+      const computedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
+      return {
+        serviceId: row.serviceId,
+        serviceName: originalService ? originalService.name : row.serviceId,
+        adults: row.adults,
+        children: row.children,
+        rate: computedRowRate
+      };
+    });
 
     const payload = {
       entryUser: user?.username || 'System',
@@ -567,8 +730,9 @@ export default function BookingPortal() {
       promotionFees: partner === 'Promotion' ? (parseFloat(promotionFees) || 0) : 0,
       name,
       mob,
-      pax: parseInt(pax) || 1,
-      services: selectedServices.map(srvId => SERVICE_TYPES.find(s => s.id === srvId)?.name || srvId),
+      adults: guestAdults,
+      children: guestChildren,
+      services: servicesPayload,
       addons: selectedAddons.map(addonId => ADDONS.find(a => a.id === addonId)?.name || addonId),
       rate: rateVal,
       advance: advanceVal,
@@ -585,6 +749,7 @@ export default function BookingPortal() {
       guestRemarks,
       serviceRemarks,
       staffRemarks,
+      location: selectedLocation,
     };
 
     try {
@@ -609,6 +774,48 @@ export default function BookingPortal() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Reusable Stepper Component (With Editable Inputs)
+  const EditableStepper = ({ 
+    label, 
+    value, 
+    onChange, 
+    min = 0 
+  }: { 
+    label?: string; 
+    value: number; 
+    onChange: (val: number) => void; 
+    min?: number 
+  }) => {
+    return (
+      <div className="flex flex-col gap-1 w-full">
+        {label && <label className="text-[10px] text-zinc-400 font-semibold">{label}</label>}
+        <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 rounded-xl p-1 w-full">
+          <button
+            type="button"
+            onClick={() => onChange(Math.max(min, value - 1))}
+            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+          >
+            -
+          </button>
+          <input
+            type="number"
+            min={min}
+            value={value}
+            onChange={(e) => onChange(Math.max(min, parseInt(e.target.value) || min))}
+            className="w-10 text-center text-xs font-black text-white bg-transparent border-none focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(value + 1)}
+            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-855 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+          >
+            +
+          </button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -638,8 +845,8 @@ export default function BookingPortal() {
               <div className="mx-auto bg-sky-500/10 p-3 rounded-full text-sky-400 mb-2 border border-sky-500/20">
                 <Lock size={28} />
               </div>
-              <h1 className="text-2xl font-black text-white">Kayaking Portal</h1>
-              <p className="text-xs text-zinc-400">Enter credentials to access booking admin panel</p>
+              <h1 className="text-2xl font-black text-white tracking-tight">Pokkalo Kayaking Club</h1>
+              <p className="text-xs text-zinc-400">Enter credentials to access booking panel</p>
             </div>
 
             <form onSubmit={handleLogin} className="flex flex-col gap-4">
@@ -705,14 +912,14 @@ export default function BookingPortal() {
             {/* Header */}
             <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
               <div className="flex flex-col">
-                <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Kayak Booking Entry</span>
-                <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
-                  Logged In: <span className="text-zinc-200">{user.username}</span>
+                <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Pokkalo Kayaking Club</span>
+                <h1 className="text-base font-bold text-white flex items-center gap-1.5">
+                  Staff: <span className="text-zinc-200">{user.username}</span>
                 </h1>
               </div>
               <button 
                 onClick={handleLogout}
-                className="flex items-center gap-1 bg-zinc-900 border border-zinc-850 hover:bg-zinc-850 text-[10px] font-semibold text-zinc-400 py-1.5 px-2.5 rounded-lg transition-all cursor-pointer"
+                className="flex items-center gap-1 bg-zinc-900 border border-zinc-850 hover:bg-zinc-855 text-[10px] font-semibold text-zinc-400 py-1.5 px-2.5 rounded-lg transition-all cursor-pointer"
               >
                 <LogOut size={12} />
                 <span>Log Out</span>
@@ -751,8 +958,8 @@ export default function BookingPortal() {
 
                   {/* Conditional input: Broker Name or Partner Name */}
                   {(partner === 'Partner' || partner === 'Broker') && (
-                    <div className="flex flex-col gap-1.5 mt-3 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-partner-name" className="text-xs text-zinc-450 font-semibold text-sky-400">
+                    <div className="flex flex-col gap-1.5 mt-3 animate-in slide-in-from-top-1 duration-155">
+                      <label htmlFor="staff-partner-name" className="text-xs text-zinc-455 font-semibold text-sky-405">
                         {partner === 'Partner' ? 'Partner Name' : 'Broker Name'}
                       </label>
                       <input
@@ -814,14 +1021,14 @@ export default function BookingPortal() {
                       placeholder="John Doe"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
                       required
                     />
                   </div>
                 </div>
 
-                {/* Tel & Guest count row */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Mobile / Steppers Row */}
+                <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="staff-mob" className="text-xs text-zinc-400 font-medium">Guest Mob</label>
                     <div className="relative">
@@ -838,26 +1045,20 @@ export default function BookingPortal() {
                     </div>
                   </div>
 
-                  {/* Pax Counter Stepper */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-zinc-400 font-medium">Pax (Guests)</label>
-                    <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 rounded-xl p-1 w-full justify-between">
-                      <button
-                        type="button"
-                        onClick={() => setPax(Math.max(1, (parseInt(pax) || 1) - 1).toString())}
-                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold flex items-center justify-center hover:bg-zinc-705 active:scale-95 transition-all text-xs"
-                      >
-                        -
-                      </button>
-                      <span className="text-xs font-black text-white">{pax}</span>
-                      <button
-                        type="button"
-                        onClick={() => setPax(((parseInt(pax) || 1) + 1).toString())}
-                        className="w-8 h-8 rounded-lg bg-zinc-800 text-white font-bold flex items-center justify-center hover:bg-zinc-705 active:scale-95 transition-all text-xs"
-                      >
-                        +
-                      </button>
-                    </div>
+                  {/* Main Guest Counter Steppers */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <EditableStepper
+                      label="Guest Adults"
+                      value={guestAdults}
+                      onChange={(val) => setGuestAdults(val)}
+                      min={1}
+                    />
+                    <EditableStepper
+                      label="Guest Children"
+                      value={guestChildren}
+                      onChange={(val) => setGuestChildren(val)}
+                      min={0}
+                    />
                   </div>
                 </div>
 
@@ -885,36 +1086,105 @@ export default function BookingPortal() {
                   <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">2. Services Selection</h2>
                 </div>
 
-                {/* Service list multi-select tags */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs text-zinc-400 font-medium">Select Services</label>
-                  <div className="flex flex-wrap gap-2">
-                    {SERVICE_TYPES.map((service) => {
-                      const isSelected = selectedServices.includes(service.id);
-                      const servicePrice = prices.services[service.id] ?? 0;
-                      const displayPriceLabel = servicePrice > 0 ? `₹${servicePrice}` : '';
+                {/* Location / Branch Dropdown Selector */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="staff-location-select" className="text-xs text-zinc-400 font-medium flex items-center gap-1">
+                    <MapPin size={12} className="text-sky-400" />
+                    <span>Select Branch Location</span>
+                  </label>
+                  <select
+                    id="staff-location-select"
+                    value={selectedLocation}
+                    onChange={(e) => setSelectedLocation(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                    required
+                  >
+                    {locationsList.length === 0 ? (
+                      <option value="">No locations available - Contact Admin</option>
+                    ) : (
+                      locationsList.map((loc) => (
+                        <option key={loc._id} value={loc.name}>
+                          {loc.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
 
-                      return (
-                        <button
-                          key={service.id}
-                          type="button"
-                          onClick={() => toggleService(service.id)}
-                          className={`py-1.5 px-2.5 rounded-lg text-[11px] font-semibold border transition-all ${
-                            isSelected
-                              ? 'bg-sky-500/10 border-sky-500 text-sky-300'
-                              : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:border-zinc-700'
-                          }`}
-                        >
-                          {service.name}
-                          {displayPriceLabel && <span className="opacity-60 ml-1">({displayPriceLabel})</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
+                {/* Service Rows Dynamic List */}
+                <div className="flex flex-col gap-4 pt-2 border-t border-zinc-850">
+                  <label className="text-xs text-zinc-400 font-medium">Add Services</label>
+                  
+                  {serviceRows.map((row, index) => {
+                    const basePrice = prices.services[row.serviceId] ?? 0;
+                    const calculatedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
+
+                    return (
+                      <div 
+                        key={index} 
+                        className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3 relative animate-in slide-in-from-top-1 duration-150"
+                      >
+                        {/* Selector / Delete Row */}
+                        <div className="flex justify-between items-center gap-2">
+                          <select
+                            value={row.serviceId}
+                            onChange={(e) => handleServiceRowChange(index, 'serviceId', e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                          >
+                            {SERVICE_TYPES.map((service) => (
+                              <option key={service.id} value={service.id}>
+                                {service.name} (₹{prices.services[service.id] ?? 0})
+                              </option>
+                            ))}
+                          </select>
+                          {serviceRows.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveServiceRow(index)}
+                              className="p-2 bg-zinc-900 hover:bg-rose-955/35 text-rose-500 rounded-lg border border-zinc-850 hover:border-rose-900/60 transition-colors active:scale-95"
+                              title="Remove service row"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Steppers for Row */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <EditableStepper
+                            label="Adults"
+                            value={row.adults}
+                            onChange={(val) => handleServiceRowChange(index, 'adults', val)}
+                            min={0}
+                          />
+                          <EditableStepper
+                            label="Children (50% Cost)"
+                            value={row.children}
+                            onChange={(val) => handleServiceRowChange(index, 'children', val)}
+                            min={0}
+                          />
+                        </div>
+
+                        {/* Row Subtotal readout */}
+                        <div className="text-right text-[10px] text-zinc-550">
+                          Row Cost: <span className="font-bold text-sky-400">₹{calculatedRowRate}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={handleAddServiceRow}
+                    className="w-full py-2 bg-zinc-900 hover:bg-zinc-850 text-sky-400 hover:text-sky-300 text-xs font-bold rounded-xl border border-zinc-855 border-dashed hover:border-sky-500/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                  >
+                    <Plus size={13} />
+                    <span>Add Service Row</span>
+                  </button>
                 </div>
 
                 {/* Addons Grid */}
-                <div className="flex flex-col gap-2 pt-2">
+                <div className="flex flex-col gap-2 pt-2 border-t border-zinc-850">
                   <label className="text-xs text-zinc-400 font-medium">Extra Add-ons</label>
                   <div className="grid grid-cols-3 gap-2">
                     {ADDONS.map((addon) => {
@@ -940,7 +1210,7 @@ export default function BookingPortal() {
                     })}
                   </div>
 
-                  {/* CUSTOM ADDON PRICING INPUTS (Food, Pickup/Drop, and Refreshment are all custom priced) */}
+                  {/* CUSTOM ADDON PRICING INPUTS */}
                   {selectedAddons.includes('pickup-drop') && (
                     <div className="flex flex-col gap-1.5 mt-2 animate-in slide-in-from-top-1 duration-150">
                       <label htmlFor="staff-pickup-price" className="text-[10px] text-zinc-400 font-medium">Pickup/Drop Total Price (₹)</label>
@@ -978,7 +1248,7 @@ export default function BookingPortal() {
                         placeholder="Enter custom refreshments cost"
                         value={customRefreshmentPrice}
                         onChange={(e) => setCustomRefreshmentPrice(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
                         required
                       />
                     </div>
@@ -1044,7 +1314,7 @@ export default function BookingPortal() {
 
                 {/* Section Remarks: Staff Assigned */}
                 <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-555 font-medium flex items-center gap-1">
                     <MessageSquare size={10} />
                     <span>Remarks (Staff Assigned)</span>
                   </label>
@@ -1076,8 +1346,8 @@ export default function BookingPortal() {
                         type="number"
                         placeholder="0"
                         value={rate}
-                        onChange={(e) => setRate(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        readOnly
+                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 pl-7 pr-3 text-xs text-zinc-300 font-semibold cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -1085,14 +1355,14 @@ export default function BookingPortal() {
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="staff-advance" className="text-xs text-zinc-400 font-medium">Advance Paid</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
                       <input
                         id="staff-advance"
                         type="number"
                         placeholder="0"
                         value={advance}
                         onChange={(e) => setAdvance(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
                       />
                     </div>
                   </div>
@@ -1103,14 +1373,14 @@ export default function BookingPortal() {
                       <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">(Isolated)</span>
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
                       <input
                         id="staff-extra-charges"
                         type="number"
                         placeholder="0"
                         value={extraCharges}
                         onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors animate-pulse"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                       />
                     </div>
                   </div>
@@ -1118,14 +1388,14 @@ export default function BookingPortal() {
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="staff-discount" className="text-xs text-zinc-400 font-medium">Discount</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
                       <input
                         id="staff-discount"
                         type="number"
                         placeholder="0"
                         value={discount}
                         onChange={(e) => setDiscount(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-555 transition-colors"
                       />
                     </div>
                   </div>
@@ -1138,7 +1408,7 @@ export default function BookingPortal() {
                       )}
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
                       <input
                         id="staff-commission"
                         type="number"
@@ -1156,12 +1426,12 @@ export default function BookingPortal() {
                   <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-3">
                     <label className="text-xs text-zinc-400 font-medium">Balance Due</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
                       <input
                         type="text"
                         readOnly
                         value={balanceVal}
-                        className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-2.5 pl-7 pr-3 text-xs text-amber-400 font-bold cursor-not-allowed"
+                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2.5 pl-7 pr-3 text-xs text-amber-400 font-bold cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -1229,11 +1499,11 @@ export default function BookingPortal() {
                         className="bg-zinc-950/40 border border-zinc-900 rounded-lg p-2 flex flex-col gap-0.5 cursor-pointer hover:border-sky-500/30 transition-colors"
                       >
                         <div className="flex justify-between text-[10px] font-bold text-zinc-300">
-                          <span>{booking.name} - {booking.mob} ({booking.pax} Pax)</span>
+                          <span>{booking.name} ({booking.location})</span>
                           <span className="text-sky-400">₹{booking.total}</span>
                         </div>
-                        <div className="text-[8px] text-zinc-500">
-                          Services: {booking.services.join(', ')}
+                        <div className="text-[8px] text-zinc-550 truncate">
+                          Services: {booking.services.map(s => s.serviceName).join(', ')}
                         </div>
                         <div className="flex justify-between text-[7px] text-zinc-650 mt-1">
                           <span>Staff: Guide: {booking.guideStaff} | Assist: {booking.assistStaff}</span>
@@ -1253,12 +1523,12 @@ export default function BookingPortal() {
             {/* Header */}
             <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
               <div className="flex flex-col">
-                <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">Central Controller</span>
+                <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">Pokkalo Controller</span>
                 <h1 className="text-base font-black text-white">Admin Console</h1>
               </div>
               <button 
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-[10px] font-semibold text-zinc-400 py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 hover:bg-zinc-850 text-[10px] font-semibold text-zinc-400 py-1.5 px-3 rounded-lg transition-all cursor-pointer"
               >
                 <LogOut size={12} />
                 <span>Log Out</span>
@@ -1292,6 +1562,54 @@ export default function BookingPortal() {
               </div>
             </div>
 
+            {/* Manage Location Branches */}
+            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                <MapPin size={16} className="text-sky-400" />
+                <span>Manage Locations (Branches)</span>
+              </h3>
+
+              {/* Add Location Form */}
+              <form onSubmit={handleCreateLocation} className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
+                <input
+                  type="text"
+                  placeholder="Location / Branch Name (e.g. Varkala)"
+                  value={newLocationName}
+                  onChange={(e) => setNewLocationName(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Plus size={12} />
+                  <span>Add Location Branch</span>
+                </button>
+              </form>
+
+              {/* List Locations */}
+              {locationsList.length === 0 ? (
+                <div className="text-center py-2 text-[10px] text-zinc-650">No locations configured. Add branch above.</div>
+              ) : (
+                <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
+                  {locationsList.map((loc) => (
+                    <div key={loc._id} className="bg-zinc-900/60 rounded-lg py-1.5 px-2.5 flex justify-between items-center text-xs border border-zinc-855/60">
+                      <span className="font-semibold text-zinc-200">{loc.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLocation(loc._id, loc.name)}
+                        className="text-rose-500 hover:text-rose-400 p-1 rounded-md"
+                        title="Delete branch location"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Dynamic Price Customization Section */}
             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
@@ -1312,13 +1630,13 @@ export default function BookingPortal() {
                           ...priceFormServices,
                           [srv.id]: parseInt(e.target.value) || 0
                         })}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                        className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-505"
                       />
                     </div>
                   ))}
                 </div>
                 <div className="text-[8px] text-zinc-500 leading-normal bg-zinc-900/40 p-2 rounded-lg border border-zinc-850 mt-1">
-                  💡 Note: All add-ons (Pickup/Drop, Food, and Refreshment) are priced dynamically inside the staff booking form.
+                  💡 Note: All add-ons are custom rated in the staff forms. Children are auto-calculated at 50% service base prices.
                 </div>
 
                 <button
@@ -1374,7 +1692,7 @@ export default function BookingPortal() {
                   <span>Loading staff database...</span>
                 </div>
               ) : staffList.length === 0 ? (
-                <div className="text-center py-2 text-[10px] text-zinc-650">No staff members configured. Use form above to add.</div>
+                <div className="text-center py-2 text-[10px] text-zinc-655">No staff members configured. Use form above to add.</div>
               ) : (
                 <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
                   {staffList.map((member) => (
@@ -1386,7 +1704,7 @@ export default function BookingPortal() {
                       <button
                         type="button"
                         onClick={() => handleDeleteStaff(member.username)}
-                        className="text-rose-500 hover:text-rose-400 p-1 rounded-md transition-colors"
+                        className="text-rose-500 hover:text-rose-455 p-1 rounded-md transition-colors"
                         title="Delete account"
                       >
                         <Trash2 size={12} />
@@ -1397,7 +1715,7 @@ export default function BookingPortal() {
               )}
             </div>
 
-            {/* Bookings log table (Admin view) */}
+            {/* Bookings log table */}
             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
               <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
                 <span className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1">
@@ -1418,7 +1736,7 @@ export default function BookingPortal() {
                     onClick={fetchBookings} 
                     className="text-[9px] text-sky-400 hover:text-sky-300 font-semibold"
                   >
-                    Sync Logs
+                    Sync
                   </button>
                 </div>
               </div>
@@ -1434,23 +1752,36 @@ export default function BookingPortal() {
                 <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
                   {bookings.map((booking) => (
                     <div 
-                      key={booking._id} 
-                      onClick={() => setSelectedBookingForDetails(booking)}
-                      className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] cursor-pointer hover:border-sky-500/30 transition-colors"
+                      key={booking._id}
+                      className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] relative hover:border-zinc-800 transition-colors"
                     >
-                      <div className="flex justify-between items-start">
-                        <span className="font-bold text-zinc-200">{booking.name} - {booking.mob} ({booking.pax} Guests)</span>
-                        <span className="font-black text-emerald-400">₹{booking.total}</span>
+                      {/* Clickable Card Body */}
+                      <div 
+                        onClick={() => setSelectedBookingForDetails(booking)}
+                        className="cursor-pointer flex flex-col gap-1 pr-6"
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className="font-bold text-zinc-200">{booking.name} ({booking.location})</span>
+                          <span className="font-black text-emerald-400">₹{booking.total}</span>
+                        </div>
+                        <div className="text-[9px] text-zinc-400 leading-tight">
+                          <strong>Services:</strong> {booking.services.map(s => `${s.serviceName} (x${s.adults}A, ${s.children}C)`).join(', ')}
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-500 border-t border-zinc-900/60 pt-1 mt-1">
+                          <span>By: <strong className="text-zinc-400">{booking.entryUser}</strong> ({booking.partner})</span>
+                          <span className="text-right">Adv: ₹{booking.advance} | Bal: ₹{booking.balance}</span>
+                        </div>
                       </div>
-                      <div className="text-[9px] text-zinc-400 leading-tight">
-                        <strong>Services:</strong> {booking.services.join(', ')}
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-500 border-t border-zinc-900/60 pt-1 mt-1">
-                        <span>Log creator: <strong className="text-zinc-400">{booking.entryUser}</strong></span>
-                        <span className="text-right">Advance: ₹{booking.advance} | Bal: ₹{booking.balance}</span>
-                        <span>Staff: G: {booking.guideStaff} | A: {booking.assistStaff}</span>
-                        <span className="text-right">{new Date(booking.createdAt).toLocaleDateString()} {new Date(booking.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                      </div>
+
+                      {/* Absolute delete button for Admin */}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBooking(booking._id, booking.name)}
+                        className="absolute right-2 top-2 p-1.5 bg-zinc-900 hover:bg-rose-955 text-rose-500 hover:text-white rounded-md border border-zinc-850 hover:border-rose-900 transition-all cursor-pointer"
+                        title="Delete log permanently"
+                      >
+                        <Trash2 size={11} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1467,14 +1798,14 @@ export default function BookingPortal() {
               {/* Header */}
               <div className="flex justify-between items-start pb-3 border-b border-zinc-800">
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Booking Receipt Details</span>
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">Pokkalo Booking Details</span>
                   <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
                     {selectedBookingForDetails.name}
                   </h3>
                 </div>
                 <button
                   onClick={() => setSelectedBookingForDetails(null)}
-                  className="text-xs text-zinc-500 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
+                  className="text-xs text-zinc-505 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
                 >
                   Close
                 </button>
@@ -1488,6 +1819,10 @@ export default function BookingPortal() {
                   <div className="flex justify-between">
                     <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
                     <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[10px] font-medium">Branch Location</span>
+                    <span className="text-zinc-200 font-semibold text-sky-400">{selectedBookingForDetails.location || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500 text-[10px] font-medium">Log Date</span>
@@ -1505,8 +1840,8 @@ export default function BookingPortal() {
                         <div className="font-semibold text-white">{selectedBookingForDetails.mob}</div>
                       </div>
                       <div>
-                        <div className="text-[9px] text-zinc-500">Group Size (Pax)</div>
-                        <div className="font-semibold text-white">{selectedBookingForDetails.pax} Guests</div>
+                        <div className="text-[9px] text-zinc-500">Group Breakdown</div>
+                        <div className="font-semibold text-white">{selectedBookingForDetails.adults} Adults, {selectedBookingForDetails.children} Children</div>
                       </div>
                     </div>
                     <div className="border-t border-zinc-855 pt-1.5 mt-1">
@@ -1583,10 +1918,17 @@ export default function BookingPortal() {
                 {/* Selected Services & Addons */}
                 <div className="flex flex-col gap-1.5">
                   <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Services Logs</div>
-                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1">
+                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
                     <div>
-                      <span className="text-zinc-500 text-[10px]">Activities:</span>
-                      <p className="font-semibold text-zinc-200">{selectedBookingForDetails.services.join(', ')}</p>
+                      <span className="text-zinc-500 text-[10px]">Activities Roster:</span>
+                      <div className="flex flex-col gap-1 mt-1 pl-1">
+                        {selectedBookingForDetails.services.map((s, idx) => (
+                          <div key={idx} className="flex justify-between text-[10px] text-zinc-300">
+                            <span>&bull; {s.serviceName} (x{s.adults}A, {s.children}C)</span>
+                            <span className="font-semibold text-zinc-400">₹{s.rate}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                     {selectedBookingForDetails.addons && selectedBookingForDetails.addons.length > 0 && (
                       <div className="border-t border-zinc-850 pt-1.5 mt-1">
@@ -1630,15 +1972,15 @@ export default function BookingPortal() {
                         <span className="text-emerald-400 font-medium">- ₹{selectedBookingForDetails.discount}</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-850 pt-1 mt-0.5">
+                    <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-855 pt-1 mt-0.5">
                       <span>Balance Due</span>
                       <span>₹{selectedBookingForDetails.balance}</span>
                     </div>
-                    <div className="flex justify-between text-zinc-400 border-t border-zinc-850 pt-1.5 mt-1">
+                    <div className="flex justify-between text-zinc-400 border-t border-zinc-855 pt-1.5 mt-1">
                       <span>Agent Commission</span>
                       <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
                     </div>
-                    <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-850 pt-1 mt-0.5">
+                    <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-855 pt-1 mt-0.5">
                       <span>Total Bill (incl. Addons)</span>
                       <span>₹{selectedBookingForDetails.total}</span>
                     </div>
@@ -1653,8 +1995,8 @@ export default function BookingPortal() {
 
         {/* Dynamic attribution footer */}
         <footer className="mt-auto pt-8 pb-4 text-center">
-          <p className="text-[9px] text-zinc-655 opacity-40 hover:opacity-100 transition-opacity font-semibold">
-            Pokkalo Club &copy; {new Date().getFullYear()} &bull; Made by Alvin Ben George
+          <p className="text-[9px] text-zinc-650 opacity-40 hover:opacity-100 transition-opacity font-semibold">
+            Pokkalo Kayaking Club &copy; {new Date().getFullYear()} &bull; Made by Alvin Ben George
           </p>
         </footer>
 
