@@ -845,91 +845,7 @@ export default function BookingPortal() {
     }
   };
 
-  // Reusable Stepper Component (With Editable Inputs)
-  const EditableStepper = ({ 
-    label, 
-    value, 
-    onChange, 
-    min = 0 
-  }: { 
-    label?: string; 
-    value: number; 
-    onChange: (val: number) => void; 
-    min?: number 
-  }) => {
-    const [inputValue, setInputValue] = useState<string>(value.toString());
-    const inputRef = useRef<HTMLInputElement>(null);
-
-    // Keep local state in sync when value changes externally, unless input is focused
-    useEffect(() => {
-      if (document.activeElement === inputRef.current) {
-        return;
-      }
-      setInputValue(value.toString());
-    }, [value]);
-
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const valStr = e.target.value;
-      setInputValue(valStr);
-      if (valStr !== '') {
-        const parsed = parseInt(valStr, 10);
-        if (!isNaN(parsed)) {
-          onChange(Math.max(min, parsed));
-        }
-      }
-    };
-
-    const handleBlur = () => {
-      if (inputValue === '' || isNaN(parseInt(inputValue, 10))) {
-        setInputValue(min.toString());
-        onChange(min);
-      } else {
-        const parsed = parseInt(inputValue, 10);
-        const clamped = Math.max(min, parsed);
-        setInputValue(clamped.toString());
-        onChange(clamped);
-      }
-    };
-
-    return (
-      <div className="flex flex-col gap-1 w-full">
-        {label && <label className="text-[10px] text-zinc-400 font-semibold">{label}</label>}
-        <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 rounded-xl p-1 w-full">
-          <button
-            type="button"
-            onClick={() => {
-              const newVal = Math.max(min, value - 1);
-              setInputValue(newVal.toString());
-              onChange(newVal);
-            }}
-            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-855 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
-          >
-            -
-          </button>
-          <input
-            ref={inputRef}
-            type="number"
-            min={min}
-            value={inputValue}
-            onChange={handleInputChange}
-            onBlur={handleBlur}
-            className="w-10 text-center text-xs font-black text-white bg-transparent border-none focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const newVal = value + 1;
-              setInputValue(newVal.toString());
-              onChange(newVal);
-            }}
-            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
-          >
-            +
-          </button>
-        </div>
-      </div>
-    );
-  };
+  // Stepper moved to top/bottom file scope
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -2087,3 +2003,89 @@ export default function BookingPortal() {
     </div>
   );
 }
+
+// Reusable Stepper Component (With Editable Inputs)
+const EditableStepper = ({ 
+  label, 
+  value, 
+  onChange, 
+  min = 0 
+}: { 
+  label?: string; 
+  value: number; 
+  onChange: (val: number) => void; 
+  min?: number 
+}) => {
+  const [inputValue, setInputValue] = useState<string>(value.toString());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Keep local state in sync when value changes externally, unless input is focused
+  useEffect(() => {
+    if (document.activeElement === inputRef.current) {
+      return;
+    }
+    setInputValue(value.toString());
+  }, [value]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valStr = e.target.value;
+    setInputValue(valStr);
+    if (valStr !== '') {
+      const parsed = parseInt(valStr, 10);
+      if (!isNaN(parsed)) {
+        onChange(Math.max(min, parsed));
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    if (inputValue === '' || isNaN(parseInt(inputValue, 10))) {
+      setInputValue(min.toString());
+      onChange(min);
+    } else {
+      const parsed = parseInt(inputValue, 10);
+      const clamped = Math.max(min, parsed);
+      setInputValue(clamped.toString());
+      onChange(clamped);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      {label && <label className="text-[10px] text-zinc-400 font-semibold">{label}</label>}
+      <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 rounded-xl p-1 w-full">
+        <button
+          type="button"
+          onClick={() => {
+            const newVal = Math.max(min, value - 1);
+            setInputValue(newVal.toString());
+            onChange(newVal);
+          }}
+          className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-855 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+        >
+          -
+        </button>
+        <input
+          ref={inputRef}
+          type="number"
+          min={min}
+          value={inputValue}
+          onChange={handleInputChange}
+          onBlur={handleBlur}
+          className="w-10 text-center text-xs font-black text-white bg-transparent border-none focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            const newVal = value + 1;
+            setInputValue(newVal.toString());
+            onChange(newVal);
+          }}
+          className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+};
