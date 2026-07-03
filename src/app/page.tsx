@@ -314,12 +314,23 @@ export default function BookingPortal() {
     }
   }, [partner]);
 
-  // Initialize serviceRow if dynamic prices load later
+  // Initialize/validate serviceRows when dynamic prices load or update
   useEffect(() => {
-    if (prices.services.length > 0 && serviceRows.length === 0) {
-      setServiceRows([{ serviceId: prices.services[0].id, adults: 1, children: 0 }]);
+    if (prices.services.length > 0) {
+      setServiceRows(prev => {
+        if (prev.length === 0) {
+          return [{ serviceId: prices.services[0].id, adults: 1, children: 0 }];
+        }
+        return prev.map(row => {
+          const exists = prices.services.some(s => s.id === row.serviceId);
+          if (!exists) {
+            return { ...row, serviceId: prices.services[0].id };
+          }
+          return row;
+        });
+      });
     }
-  }, [prices, serviceRows]);
+  }, [prices]);
 
   // Combine staff names for selectors
   const staffNamesList = staffList.length > 0 
@@ -579,26 +590,26 @@ export default function BookingPortal() {
 
     const dataToExport = bookings.map((b) => ({
       'Logged By (Staff)': b.entryUser,
-      'Branch Location': b.location || 'N/A',
       'Date': new Date(b.createdAt).toLocaleDateString(),
       'Time': new Date(b.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-      'Guest Name': b.name,
-      'Mobile Number': b.mob,
-      'Adults Count': b.adults,
-      'Children Count': b.children,
       'Partner Channel': b.partner,
       'Partner/Broker Name': b.partnerName || 'N/A',
+      'Guest Name': b.name,
+      'Mobile Number': b.mob,
+      'Guest Adults Count': b.adults,
+      'Guest Children Count': b.children,
+      'Branch Location': b.location || 'N/A',
       'Services Details Summary': b.services.map(s => `${s.serviceName} (A:${s.adults}, C:${s.children})`).join(' | '),
       'Addons selected': b.addons.join(', '),
+      'Guide Roster': b.guideStaff,
+      'Assist Roster': b.assistStaff,
       'Rate (Base)': b.rate,
+      'Advance Paid': b.advance,
       'Extra Charges (Isolated)': b.extraCharges || 0,
       'Discount Applied': b.discount || 0,
-      'Advance Paid': b.advance,
       'Balance Due': b.balance,
       'Agent Commission': b.commission,
       'Total Paid': b.total,
-      'Guide Roster': b.guideStaff,
-      'Assist Roster': b.assistStaff,
       'Guest Remarks': b.guestRemarks || '',
       'Service Remarks': b.serviceRemarks || '',
       'Staff Remarks': b.staffRemarks || '',
@@ -606,7 +617,7 @@ export default function BookingPortal() {
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
-    Xpath: XLSX.utils.book_append_sheet(workbook, worksheet, "Club Bookings");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Club Bookings");
 
     XLSX.writeFile(workbook, `Pokkalo_Kayaking_Club_Bookings_${new Date().toISOString().slice(0, 10)}.xlsx`);
     showToast('success', 'Excel report downloaded successfully!');
@@ -846,27 +857,66 @@ export default function BookingPortal() {
     onChange: (val: number) => void; 
     min?: number 
   }) => {
+    const [inputValue, setInputValue] = useState<string>(value.toString());
+
+    // Keep local state in sync when value changes externally
+    useEffect(() => {
+      setInputValue(value.toString());
+    }, [value]);
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const valStr = e.target.value;
+      setInputValue(valStr);
+      if (valStr !== '') {
+        const parsed = parseInt(valStr, 10);
+        if (!isNaN(parsed)) {
+          onChange(Math.max(min, parsed));
+        }
+      }
+    };
+
+    const handleBlur = () => {
+      if (inputValue === '' || isNaN(parseInt(inputValue, 10))) {
+        setInputValue(min.toString());
+        onChange(min);
+      } else {
+        const parsed = parseInt(inputValue, 10);
+        const clamped = Math.max(min, parsed);
+        setInputValue(clamped.toString());
+        onChange(clamped);
+      }
+    };
+
     return (
       <div className="flex flex-col gap-1 w-full">
         {label && <label className="text-[10px] text-zinc-400 font-semibold">{label}</label>}
         <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 rounded-xl p-1 w-full">
           <button
             type="button"
-            onClick={() => onChange(Math.max(min, value - 1))}
-            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+            onClick={() => {
+              const newVal = Math.max(min, value - 1);
+              setInputValue(newVal.toString());
+              onChange(newVal);
+            }}
+            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-855 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
           >
             -
           </button>
           <input
             type="number"
             min={min}
-            value={value}
-            onChange={(e) => onChange(Math.max(min, parseInt(e.target.value) || min))}
+            value={inputValue}
+            onChange={handleInputChange}
+            onBlur={handleBlur}
             className="w-10 text-center text-xs font-black text-white bg-transparent border-none focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
           <button
             type="button"
-            onClick={() => onChange(value + 1)}
+            onClick={() => {
+              const newVal = value + 1;
+              setInputValue(newVal.toString());
+              onChange(newVal);
+            }}
             className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
           >
             +
@@ -1153,7 +1203,7 @@ export default function BookingPortal() {
                           <select
                             value={row.serviceId}
                             onChange={(e) => handleServiceRowChange(index, 'serviceId', e.target.value)}
-                            className="bg-zinc-905 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
                           >
                             {prices.services.map((service) => (
                               <option key={service.id} value={service.id}>
