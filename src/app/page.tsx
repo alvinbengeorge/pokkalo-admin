@@ -189,12 +189,49 @@ export default function BookingPortal() {
       const res = await fetch('/api/prices');
       if (res.ok) {
         const data = await res.json();
-        setPrices(data);
-        setPriceFormServices(data.services || []);
+        let servicesArray: ServicePricingConfig[] = [];
+        if (Array.isArray(data.services)) {
+          servicesArray = data.services;
+        } else if (data.services && typeof data.services === 'object') {
+          const defaultNames: Record<string, string> = {
+            'sunrise-kayaking': 'Sunrise Kayaking',
+            'sunset-kayaking': 'Sun Set Kayaking',
+            'towing': 'Towing',
+            'boating': 'Boating',
+            'fishing': 'Fishing',
+            'bioluminescence-boating': 'Bioluminescence Boating',
+            'bioluminescence-kayaking': 'Bioluminescence Kayaking',
+          };
+          servicesArray = Object.entries(data.services).map(([id, price]) => ({
+            id,
+            name: defaultNames[id] || id.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            price: Number(price) || 0
+          }));
+        }
+
+        if (servicesArray.length === 0) {
+          servicesArray = [
+            { id: 'sunrise-kayaking', name: 'Sunrise Kayaking', price: 1200 },
+            { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1500 },
+            { id: 'towing', name: 'Towing', price: 800 },
+            { id: 'boating', name: 'Boating', price: 2000 },
+            { id: 'fishing', name: 'Fishing', price: 2500 },
+            { id: 'bioluminescence-boating', name: 'Bioluminescence Boating', price: 1800 },
+            { id: 'bioluminescence-kayaking', name: 'Bioluminescence Kayaking', price: 2200 }
+          ];
+        }
+
+        const normalizedData = {
+          services: servicesArray,
+          addons: data.addons || {},
+        };
+
+        setPrices(normalizedData);
+        setPriceFormServices(servicesArray);
         
         // Initialize default service row on staff side if none exists
-        if (data.services && data.services.length > 0 && serviceRows.length === 0) {
-          setServiceRows([{ serviceId: data.services[0].id, adults: 1, children: 0 }]);
+        if (servicesArray.length > 0 && serviceRows.length === 0) {
+          setServiceRows([{ serviceId: servicesArray[0].id, adults: 1, children: 0 }]);
         }
       }
     } catch (err) {
@@ -1608,7 +1645,7 @@ export default function BookingPortal() {
                 <div className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
                 
                 <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                  {priceFormServices.map((srv, idx) => (
+                  {Array.isArray(priceFormServices) && priceFormServices.map((srv, idx) => (
                     <div key={idx} className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col gap-2 relative">
                       <div className="flex items-center gap-2">
                         <input
