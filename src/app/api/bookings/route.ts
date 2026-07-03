@@ -27,8 +27,6 @@ export async function POST(request: Request) {
       customPickupPrice,
       customFoodPrice,
       customRefreshmentPrice,
-      promoterUrl,
-      promotionFees,
       guestRemarks,
       serviceRemarks,
       staffRemarks,
@@ -51,14 +49,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Require promoterUrl for promotion
-    if (partner === 'Promotion' && !promoterUrl?.trim()) {
-      return NextResponse.json(
-        { error: 'Promoter URL is required when Partner Type is Promotion' },
-        { status: 400 }
-      );
-    }
-
     if (!services || services.length === 0) {
       return NextResponse.json(
         { error: 'At least one service type must be added' },
@@ -76,8 +66,6 @@ export async function POST(request: Request) {
       entryUser,
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? (partnerName || '') : '',
-      promoterUrl: partner === 'Promotion' ? (promoterUrl || '') : '',
-      promotionFees: partner === 'Promotion' ? (Number(promotionFees) || 0) : 0,
       name,
       mob,
       adults: Number(adults),
@@ -158,7 +146,7 @@ export async function DELETE(request: Request) {
     if (!id) {
       return NextResponse.json(
         { error: 'Missing booking ID parameter' },
-        { status: 450 }
+        { status: 400 }
       );
     }
 

@@ -2,15 +2,15 @@ import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 
 const DEFAULT_PRICES = {
-  services: {
-    'sunrise-kayaking': 1200,
-    'sunset-kayaking': 1500,
-    'towing': 800,
-    'boating': 2000,
-    'fishing': 2500,
-    'bioluminescence-boating': 1800,
-    'bioluminescence-kayaking': 2200,
-  },
+  services: [
+    { id: 'sunrise-kayaking', name: 'Sunrise Kayaking', price: 1200 },
+    { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1500 },
+    { id: 'towing', name: 'Towing', price: 800 },
+    { id: 'boating', name: 'Boating', price: 2000 },
+    { id: 'fishing', name: 'Fishing', price: 2505 },
+    { id: 'bioluminescence-boating', name: 'Bioluminescence Boating', price: 1800 },
+    { id: 'bioluminescence-kayaking', name: 'Bioluminescence Kayaking', price: 2200 }
+  ],
   addons: {}
 };
 
@@ -43,9 +43,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { services } = body;
 
-    if (!services) {
+    if (!services || !Array.isArray(services)) {
       return NextResponse.json(
-        { error: 'Missing services configuration' },
+        { error: 'Services array is required' },
         { status: 400 }
       );
     }

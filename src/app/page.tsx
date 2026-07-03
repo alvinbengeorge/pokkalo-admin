@@ -28,18 +28,8 @@ import {
   MessageSquare
 } from 'lucide-react';
 
-const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker', 'Promotion'] as const;
+const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker'] as const;
 type PartnerType = typeof PARTNER_TYPES[number];
-
-const SERVICE_TYPES = [
-  { id: 'sunrise-kayaking', name: 'Sunrise Kayaking' },
-  { id: 'sunset-kayaking', name: 'Sun Set Kayaking' },
-  { id: 'towing', name: 'Towing' },
-  { id: 'boating', name: 'Boating' },
-  { id: 'fishing', name: 'Fishing' },
-  { id: 'bioluminescence-boating', name: 'Bioluminescence Boating' },
-  { id: 'bioluminescence-kayaking', name: 'Bioluminescence Kayaking' },
-] as const;
 
 const ADDONS = [
   { id: 'pickup-drop', name: 'Pickup and drop', icon: MapPin },
@@ -60,8 +50,6 @@ interface BookingRecord {
   entryUser: string;
   partner: string;
   partnerName?: string;
-  promoterUrl?: string;
-  promotionFees?: number;
   name: string;
   mob: string;
   adults: number;
@@ -100,6 +88,12 @@ interface LocationBranch {
   createdAt: string;
 }
 
+interface ServicePricingConfig {
+  id: string;
+  name: string;
+  price: number;
+}
+
 type AuthUser = {
   username: string;
   role: 'admin' | 'staff';
@@ -115,18 +109,18 @@ export default function BookingPortal() {
 
   // Dynamic Prices State
   const [prices, setPrices] = useState<{
-    services: Record<string, number>;
+    services: ServicePricingConfig[];
     addons: Record<string, number>;
   }>({
-    services: {
-      'sunrise-kayaking': 1200,
-      'sunset-kayaking': 1500,
-      'towing': 800,
-      'boating': 2000,
-      'fishing': 2500,
-      'bioluminescence-boating': 1800,
-      'bioluminescence-kayaking': 2200,
-    },
+    services: [
+      { id: 'sunrise-kayaking', name: 'Sunrise Kayaking', price: 1200 },
+      { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1505 },
+      { id: 'towing', name: 'Towing', price: 800 },
+      { id: 'boating', name: 'Boating', price: 2000 },
+      { id: 'fishing', name: 'Fishing', price: 2500 },
+      { id: 'bioluminescence-boating', name: 'Bioluminescence Boating', price: 1800 },
+      { id: 'bioluminescence-kayaking', name: 'Bioluminescence Kayaking', price: 2200 }
+    ],
     addons: {}
   });
 
@@ -142,8 +136,6 @@ export default function BookingPortal() {
   // Form Fields State (Staff view)
   const [partner, setPartner] = useState<PartnerType>('Walk-In');
   const [partnerName, setPartnerName] = useState('');
-  const [promoterUrl, setPromoterUrl] = useState('');
-  const [promotionFees, setPromotionFees] = useState('');
   const [name, setName] = useState('');
   const [mob, setMob] = useState('');
   
@@ -156,9 +148,7 @@ export default function BookingPortal() {
     serviceId: string;
     adults: number;
     children: number;
-  }>>([
-    { serviceId: 'sunrise-kayaking', adults: 1, children: 0 }
-  ]);
+  }>>([]);
 
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
   const [rate, setRate] = useState<string>('');
@@ -184,7 +174,7 @@ export default function BookingPortal() {
   const [adminLoading, setAdminLoading] = useState(false);
 
   // Admin Customizable Prices Form State
-  const [priceFormServices, setPriceFormServices] = useState<Record<string, number>>({});
+  const [priceFormServices, setPriceFormServices] = useState<ServicePricingConfig[]>([]);
 
   // General App State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -200,7 +190,12 @@ export default function BookingPortal() {
       if (res.ok) {
         const data = await res.json();
         setPrices(data);
-        setPriceFormServices(data.services);
+        setPriceFormServices(data.services || []);
+        
+        // Initialize default service row on staff side if none exists
+        if (data.services && data.services.length > 0 && serviceRows.length === 0) {
+          setServiceRows([{ serviceId: data.services[0].id, adults: 1, children: 0 }]);
+        }
       }
     } catch (err) {
       console.error('Failed to load prices:', err);
@@ -282,6 +277,13 @@ export default function BookingPortal() {
     }
   }, [partner]);
 
+  // Initialize serviceRow if dynamic prices load later
+  useEffect(() => {
+    if (prices.services.length > 0 && serviceRows.length === 0) {
+      setServiceRows([{ serviceId: prices.services[0].id, adults: 1, children: 0 }]);
+    }
+  }, [prices, serviceRows]);
+
   // Combine staff names for selectors
   const staffNamesList = staffList.length > 0 
     ? staffList.map(s => s.username) 
@@ -350,9 +352,38 @@ export default function BookingPortal() {
     showToast('success', 'Logged out successfully');
   };
 
+  // Admin Custom Services Modifiers
+  const handleAdminServiceChange = (index: number, key: 'name' | 'price', val: any) => {
+    const updated = [...priceFormServices];
+    updated[index] = {
+      ...updated[index],
+      [key]: val
+    };
+    setPriceFormServices(updated);
+  };
+
+  const handleAdminDeleteService = (index: number) => {
+    setPriceFormServices(priceFormServices.filter((_, idx) => idx !== index));
+  };
+
+  const handleAdminAddService = () => {
+    setPriceFormServices([
+      ...priceFormServices,
+      { id: 'custom-' + Date.now(), name: '', price: 0 }
+    ]);
+  };
+
   // Admin: Save customized prices
   const handleSavePrices = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Check if any service names are empty
+    const hasEmpty = priceFormServices.some(s => !s.name.trim());
+    if (hasEmpty) {
+      showToast('error', 'All service names must be filled out');
+      return;
+    }
+
     setAdminLoading(true);
     try {
       const res = await fetch('/api/prices', {
@@ -360,7 +391,6 @@ export default function BookingPortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           services: priceFormServices,
-          addons: {},
         }),
       });
       const data = await res.json();
@@ -521,8 +551,6 @@ export default function BookingPortal() {
       'Children Count': b.children,
       'Partner Channel': b.partner,
       'Partner/Broker Name': b.partnerName || 'N/A',
-      'Promoter URL': b.promoterUrl || 'N/A',
-      'Promotion Fees': b.promotionFees || 0,
       'Services Details Summary': b.services.map(s => `${s.serviceName} (A:${s.adults}, C:${s.children})`).join(' | '),
       'Addons selected': b.addons.join(', '),
       'Rate (Base)': b.rate,
@@ -541,7 +569,7 @@ export default function BookingPortal() {
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Club Bookings");
+    Xpath: XLSX.utils.book_append_sheet(workbook, worksheet, "Club Bookings");
 
     XLSX.writeFile(workbook, `Pokkalo_Kayaking_Club_Bookings_${new Date().toISOString().slice(0, 10)}.xlsx`);
     showToast('success', 'Excel report downloaded successfully!');
@@ -554,7 +582,8 @@ export default function BookingPortal() {
     
     let totalBaseCalculated = 0;
     serviceRows.forEach(row => {
-      const basePrice = prices.services[row.serviceId] ?? 0;
+      const match = prices.services.find(s => s.id === row.serviceId);
+      const basePrice = match ? match.price : 0;
       const adultCost = basePrice * row.adults;
       const childCost = basePrice * row.children * 0.5;
       totalBaseCalculated += (adultCost + childCost);
@@ -567,19 +596,16 @@ export default function BookingPortal() {
   useEffect(() => {
     if (partner === 'Walk-In') {
       setPartnerName('');
-      setPromoterUrl('');
-      setPromotionFees('');
-    } else if (partner === 'Partner' || partner === 'Broker') {
-      setPromoterUrl('');
-      setPromotionFees('');
-    } else if (partner === 'Promotion') {
-      setPartnerName('');
     }
   }, [partner]);
 
   // Dynamic Service Row Actions
   const handleAddServiceRow = () => {
-    setServiceRows([...serviceRows, { serviceId: 'sunrise-kayaking', adults: 1, children: 0 }]);
+    if (prices.services.length > 0) {
+      setServiceRows([...serviceRows, { serviceId: prices.services[0].id, adults: 1, children: 0 }]);
+    } else {
+      showToast('error', 'No services available to select');
+    }
   };
 
   const handleRemoveServiceRow = (index: number) => {
@@ -638,9 +664,11 @@ export default function BookingPortal() {
     setGuestChildren(0);
     setPartner('Walk-In');
     setPartnerName('');
-    setPromoterUrl('');
-    setPromotionFees('');
-    setServiceRows([{ serviceId: 'sunrise-kayaking', adults: 1, children: 0 }]);
+    if (prices.services.length > 0) {
+      setServiceRows([{ serviceId: prices.services[0].id, adults: 1, children: 0 }]);
+    } else {
+      setServiceRows([]);
+    }
     setSelectedAddons([]);
     setCustomFoodPrice('');
     setCustomPickupPrice('');
@@ -686,11 +714,6 @@ export default function BookingPortal() {
       return;
     }
 
-    if (partner === 'Promotion' && !promoterUrl.trim()) {
-      showToast('error', 'Please enter the Promoter URL');
-      return;
-    }
-
     if (!guideStaff) {
       showToast('error', 'Please select a Guide Staff');
       return;
@@ -710,8 +733,8 @@ export default function BookingPortal() {
 
     // Format selected services array
     const servicesPayload = serviceRows.map(row => {
-      const originalService = SERVICE_TYPES.find(s => s.id === row.serviceId);
-      const basePrice = prices.services[row.serviceId] ?? 0;
+      const originalService = prices.services.find(s => s.id === row.serviceId);
+      const basePrice = originalService ? originalService.price : 0;
       const computedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
       return {
         serviceId: row.serviceId,
@@ -726,8 +749,6 @@ export default function BookingPortal() {
       entryUser: user?.username || 'System',
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? partnerName : '',
-      promoterUrl: partner === 'Promotion' ? promoterUrl : '',
-      promotionFees: partner === 'Promotion' ? (parseFloat(promotionFees) || 0) : 0,
       name,
       mob,
       adults: guestAdults,
@@ -809,7 +830,7 @@ export default function BookingPortal() {
           <button
             type="button"
             onClick={() => onChange(value + 1)}
-            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-855 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
+            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 text-white font-bold flex items-center justify-center transition-all active:scale-95 text-xs"
           >
             +
           </button>
@@ -827,7 +848,7 @@ export default function BookingPortal() {
           <div className={`fixed top-4 left-4 right-4 z-50 p-4 rounded-xl flex items-center gap-3 shadow-2xl transition-all duration-300 transform translate-y-0 ${
             toast.type === 'success' 
               ? 'bg-emerald-950/95 border border-emerald-500/30 text-emerald-200' 
-              : 'bg-rose-950/95 border border-rose-500/30 text-rose-200'
+              : 'bg-rose-955/95 border border-rose-500/30 text-rose-200'
           }`}>
             {toast.type === 'success' ? (
               <div className="bg-emerald-500 text-emerald-950 p-1 rounded-full"><Check size={16} /></div>
@@ -939,7 +960,7 @@ export default function BookingPortal() {
                 {/* Partner Select */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs text-zinc-400 font-medium">Partner Type</label>
-                  <div className="grid grid-cols-4 gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
+                  <div className="grid grid-cols-3 gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
                     {PARTNER_TYPES.map((type) => (
                       <button
                         key={type}
@@ -973,41 +994,6 @@ export default function BookingPortal() {
                       />
                     </div>
                   )}
-
-                  {/* Conditional input: Promotion URL & Fees */}
-                  {partner === 'Promotion' && (
-                    <div className="flex flex-col gap-3 mt-3 animate-in slide-in-from-top-1 duration-150 bg-zinc-950/50 p-2.5 rounded-xl border border-zinc-900">
-                      <div className="flex flex-col gap-1.5">
-                        <label htmlFor="staff-promoter-url" className="text-xs font-semibold text-sky-400 flex items-center gap-1">
-                          <Link size={12} />
-                          <span>Promoter URL</span>
-                        </label>
-                        <input
-                          id="staff-promoter-url"
-                          type="url"
-                          placeholder="https://instagram.com/influencer"
-                          value={promoterUrl}
-                          onChange={(e) => setPromoterUrl(e.target.value)}
-                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                          required
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label htmlFor="staff-promotion-fees" className="text-xs font-semibold text-sky-400 flex items-center gap-1">
-                          <Tag size={12} />
-                          <span>Promotion Fees (₹)</span>
-                        </label>
-                        <input
-                          id="staff-promotion-fees"
-                          type="number"
-                          placeholder="0"
-                          value={promotionFees}
-                          onChange={(e) => setPromotionFees(e.target.value)}
-                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {/* Guest Name Input */}
@@ -1018,7 +1004,7 @@ export default function BookingPortal() {
                     <input
                       id="staff-name"
                       type="text"
-                      placeholder="John Doe"
+                      placeholder=""
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
@@ -1116,24 +1102,25 @@ export default function BookingPortal() {
                   <label className="text-xs text-zinc-400 font-medium">Add Services</label>
                   
                   {serviceRows.map((row, index) => {
-                    const basePrice = prices.services[row.serviceId] ?? 0;
+                    const match = prices.services.find(s => s.id === row.serviceId);
+                    const basePrice = match ? match.price : 0;
                     const calculatedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
 
                     return (
                       <div 
                         key={index} 
-                        className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3 relative animate-in slide-in-from-top-1 duration-150"
+                        className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3 relative animate-in slide-in-from-top-1 duration-150"
                       >
                         {/* Selector / Delete Row */}
                         <div className="flex justify-between items-center gap-2">
                           <select
                             value={row.serviceId}
                             onChange={(e) => handleServiceRowChange(index, 'serviceId', e.target.value)}
-                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                            className="bg-zinc-905 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
                           >
-                            {SERVICE_TYPES.map((service) => (
+                            {prices.services.map((service) => (
                               <option key={service.id} value={service.id}>
-                                {service.name} (₹{prices.services[service.id] ?? 0})
+                                {service.name} (₹{service.price})
                               </option>
                             ))}
                           </select>
@@ -1314,7 +1301,7 @@ export default function BookingPortal() {
 
                 {/* Section Remarks: Staff Assigned */}
                 <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-555 font-medium flex items-center gap-1">
+                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
                     <MessageSquare size={10} />
                     <span>Remarks (Staff Assigned)</span>
                   </label>
@@ -1380,7 +1367,7 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={extraCharges}
                         onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                       />
                     </div>
                   </div>
@@ -1416,7 +1403,7 @@ export default function BookingPortal() {
                         value={commission}
                         onChange={(e) => setCommission(e.target.value)}
                         disabled={partner === 'Walk-In'}
-                        className={`w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors ${
+                        className={`w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors ${
                           partner === 'Walk-In' ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-rose-500/20' : ''
                         }`}
                       />
@@ -1581,7 +1568,7 @@ export default function BookingPortal() {
                 />
                 <button
                   type="submit"
-                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-955 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Plus size={12} />
                   <span>Add Location Branch</span>
@@ -1599,7 +1586,7 @@ export default function BookingPortal() {
                       <button
                         type="button"
                         onClick={() => handleDeleteLocation(loc._id, loc.name)}
-                        className="text-rose-500 hover:text-rose-400 p-1 rounded-md"
+                        className="text-rose-500 hover:text-rose-450 p-1 rounded-md"
                         title="Delete branch location"
                       >
                         <Trash2 size={12} />
@@ -1610,7 +1597,7 @@ export default function BookingPortal() {
               )}
             </div>
 
-            {/* Dynamic Price Customization Section */}
+            {/* Dynamic Price Customization Section with custom additions/deletions */}
             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
                 <DollarSign size={16} className="text-amber-500" />
@@ -1618,31 +1605,54 @@ export default function BookingPortal() {
               </h3>
               
               <form onSubmit={handleSavePrices} className="flex flex-col gap-3">
-                <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {SERVICE_TYPES.map((srv) => (
-                    <div key={srv.id} className="flex flex-col gap-1">
-                      <label className="text-[9px] text-zinc-400 truncate">{srv.name}</label>
-                      <input
-                        type="number"
-                        value={priceFormServices[srv.id] ?? ''}
-                        onChange={(e) => setPriceFormServices({
-                          ...priceFormServices,
-                          [srv.id]: parseInt(e.target.value) || 0
-                        })}
-                        className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-505"
-                      />
+                <div className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
+                
+                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                  {priceFormServices.map((srv, idx) => (
+                    <div key={idx} className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col gap-2 relative">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Service Name"
+                          value={srv.name}
+                          onChange={(e) => handleAdminServiceChange(idx, 'name', e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 w-full"
+                          required
+                        />
+                        <input
+                          type="number"
+                          placeholder="Price"
+                          value={srv.price}
+                          onChange={(e) => handleAdminServiceChange(idx, 'price', parseInt(e.target.value) || 0)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2 text-xs text-white placeholder-zinc-650 w-20 text-center"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAdminDeleteService(idx)}
+                          className="p-1.5 bg-zinc-900 hover:bg-rose-955/35 text-rose-500 rounded-lg border border-zinc-850"
+                          title="Remove custom service"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
-                <div className="text-[8px] text-zinc-500 leading-normal bg-zinc-900/40 p-2 rounded-lg border border-zinc-850 mt-1">
-                  💡 Note: All add-ons are custom rated in the staff forms. Children are auto-calculated at 50% service base prices.
-                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAdminAddService}
+                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-850 text-sky-400 hover:text-sky-305 text-xs font-bold rounded-xl border border-zinc-855 border-dashed transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Plus size={13} />
+                  <span>Add Custom Service</span>
+                </button>
 
                 <button
                   type="submit"
                   disabled={adminLoading}
-                  className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 font-bold py-2 rounded-lg text-xs mt-2 transition-colors cursor-pointer"
+                  className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-800 disabled:text-zinc-550 text-zinc-955 font-bold py-2.5 rounded-xl text-xs mt-2 transition-colors cursor-pointer"
                 >
                   {adminLoading ? 'Saving...' : 'Save Customizable Prices'}
                 </button>
@@ -1657,7 +1667,7 @@ export default function BookingPortal() {
               </h3>
 
               {/* Create Staff Form */}
-              <form onSubmit={handleCreateStaff} className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
+              <form onSubmit={handleCreateStaff} className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
@@ -1672,13 +1682,13 @@ export default function BookingPortal() {
                     placeholder="Password"
                     value={newStaffPassword}
                     onChange={(e) => setNewStaffPassword(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
+                    className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
                     required
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-955 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Plus size={12} />
                   <span>Create Staff Account</span>
@@ -1734,7 +1744,7 @@ export default function BookingPortal() {
                   <button 
                     type="button" 
                     onClick={fetchBookings} 
-                    className="text-[9px] text-sky-400 hover:text-sky-300 font-semibold"
+                    className="text-[9px] text-sky-400 hover:text-sky-305 font-semibold"
                   >
                     Sync
                   </button>
@@ -1742,18 +1752,18 @@ export default function BookingPortal() {
               </div>
 
               {isLoadingBookings ? (
-                <div className="py-6 text-center text-zinc-500 text-xs flex items-center justify-center gap-1.5">
+                <div className="py-6 text-center text-zinc-550 text-xs flex items-center justify-center gap-1.5">
                   <Loader2 size={14} className="animate-spin" />
                   <span>Syncing cloud databases...</span>
                 </div>
               ) : bookings.length === 0 ? (
-                <div className="py-6 text-center text-zinc-550 text-xs">No entries submitted.</div>
+                <div className="py-6 text-center text-zinc-555 text-xs">No entries submitted.</div>
               ) : (
                 <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
                   {bookings.map((booking) => (
                     <div 
                       key={booking._id}
-                      className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] relative hover:border-zinc-800 transition-colors"
+                      className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] relative hover:border-zinc-805 transition-colors"
                     >
                       {/* Clickable Card Body */}
                       <div 
@@ -1805,7 +1815,7 @@ export default function BookingPortal() {
                 </div>
                 <button
                   onClick={() => setSelectedBookingForDetails(null)}
-                  className="text-xs text-zinc-505 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
+                  className="text-xs text-zinc-500 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
                 >
                   Close
                 </button>
@@ -1851,25 +1861,6 @@ export default function BookingPortal() {
                         {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
                       </div>
                     </div>
-                    {selectedBookingForDetails.promoterUrl && (
-                      <div className="border-t border-zinc-855 pt-1.5 mt-0.5">
-                        <div className="text-[9px] text-zinc-500">Promoter Source</div>
-                        <a 
-                          href={selectedBookingForDetails.promoterUrl} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="text-[10px] text-sky-400 font-bold hover:underline break-all"
-                        >
-                          {selectedBookingForDetails.promoterUrl}
-                        </a>
-                      </div>
-                    )}
-                    {selectedBookingForDetails.promotionFees !== undefined && selectedBookingForDetails.promotionFees > 0 && (
-                      <div className="flex justify-between border-t border-zinc-855 pt-1 mt-0.5 text-zinc-400">
-                        <span>Promotion Fees</span>
-                        <span className="text-white font-semibold">₹{selectedBookingForDetails.promotionFees}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -1995,7 +1986,7 @@ export default function BookingPortal() {
 
         {/* Dynamic attribution footer */}
         <footer className="mt-auto pt-8 pb-4 text-center">
-          <p className="text-[9px] text-zinc-650 opacity-40 hover:opacity-100 transition-opacity font-semibold">
+          <p className="text-[9px] text-zinc-655 opacity-40 hover:opacity-100 transition-opacity font-semibold">
             Pokkalo Kayaking Club &copy; {new Date().getFullYear()} &bull; Made by Alvin Ben George
           </p>
         </footer>
