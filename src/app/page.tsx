@@ -25,7 +25,10 @@ import {
   Download,
   Link,
   Tag,
-  MessageSquare
+  MessageSquare,
+  Edit2,
+  Save,
+  X
 } from 'lucide-react';
 
 const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker'] as const;
@@ -47,6 +50,7 @@ interface ServiceRow {
 
 interface BookingRecord {
   _id: string;
+  registerNumber: string;
   entryUser: string;
   partner: string;
   partnerName?: string;
@@ -65,6 +69,9 @@ interface BookingRecord {
   total: number;
   guideStaff: string;
   assistStaff: string;
+  driverStaff?: string;
+  advanceAccount?: string;
+  balanceAccount?: string;
   customPickupPrice?: number;
   customFoodPrice?: number;
   customRefreshmentPrice?: number;
@@ -114,7 +121,7 @@ export default function BookingPortal() {
   }>({
     services: [
       { id: 'sunrise-kayaking', name: 'Sunrise Kayaking', price: 1200 },
-      { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1505 },
+      { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1500 },
       { id: 'towing', name: 'Towing', price: 800 },
       { id: 'boating', name: 'Boating', price: 2000 },
       { id: 'fishing', name: 'Fishing', price: 2500 },
@@ -132,8 +139,10 @@ export default function BookingPortal() {
   // Staff Assignment State
   const [guideStaff, setGuideStaff] = useState('');
   const [assistStaff, setAssistStaff] = useState('');
+  const [driverStaff, setDriverStaff] = useState('');
 
   // Form Fields State (Staff view)
+  const [registerNumber, setRegisterNumber] = useState('');
   const [partner, setPartner] = useState<PartnerType>('Walk-In');
   const [partnerName, setPartnerName] = useState('');
   const [name, setName] = useState('');
@@ -156,6 +165,10 @@ export default function BookingPortal() {
   const [discount, setDiscount] = useState<string>('');
   const [extraCharges, setExtraCharges] = useState<string>('');
   const [commission, setCommission] = useState<string>('');
+
+  // Accounts for payments
+  const [advanceAccount, setAdvanceAccount] = useState('');
+  const [balanceAccount, setBalanceAccount] = useState('');
 
   // Custom Pricing Fields for addons
   const [customPickupPrice, setCustomPickupPrice] = useState<string>('');
@@ -181,7 +194,42 @@ export default function BookingPortal() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [isLoadingBookings, setIsLoadingBookings] = useState(false);
+  
+  // Modal detail log entry view states
   const [selectedBookingForDetails, setSelectedBookingForDetails] = useState<BookingRecord | null>(null);
+  const [isAdminEditing, setIsAdminEditing] = useState(false);
+
+  // Admin Modal Edit form values
+  const [editRegisterNumber, setEditRegisterNumber] = useState('');
+  const [editPartner, setEditPartner] = useState<PartnerType>('Walk-In');
+  const [editPartnerName, setEditPartnerName] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editMob, setEditMob] = useState('');
+  const [editAdults, setEditAdults] = useState<number>(1);
+  const [editChildren, setEditChildren] = useState<number>(0);
+  const [editServiceRows, setEditServiceRows] = useState<Array<{
+    serviceId: string;
+    adults: number;
+    children: number;
+  }>>([]);
+  const [editSelectedAddons, setEditSelectedAddons] = useState<string[]>([]);
+  const [editCustomPickupPrice, setEditCustomPickupPrice] = useState<string>('');
+  const [editCustomFoodPrice, setEditCustomFoodPrice] = useState<string>('');
+  const [editCustomRefreshmentPrice, setEditCustomRefreshmentPrice] = useState<string>('');
+  const [editGuideStaff, setEditGuideStaff] = useState('');
+  const [editAssistStaff, setEditAssistStaff] = useState('');
+  const [editDriverStaff, setEditDriverStaff] = useState('');
+  const [editRate, setEditRate] = useState<string>('');
+  const [editAdvance, setEditAdvance] = useState<string>('');
+  const [editExtraCharges, setEditExtraCharges] = useState<string>('');
+  const [editDiscount, setEditDiscount] = useState<string>('');
+  const [editCommission, setEditCommission] = useState<string>('');
+  const [editAdvanceAccount, setEditAdvanceAccount] = useState('');
+  const [editBalanceAccount, setEditBalanceAccount] = useState('');
+  const [editGuestRemarks, setEditGuestRemarks] = useState('');
+  const [editServiceRemarks, setEditServiceRemarks] = useState('');
+  const [editStaffRemarks, setEditStaffRemarks] = useState('');
+  const [editLocation, setEditLocation] = useState('');
 
   // Load customizable prices from API
   const fetchPrices = async () => {
@@ -189,49 +237,12 @@ export default function BookingPortal() {
       const res = await fetch('/api/prices');
       if (res.ok) {
         const data = await res.json();
-        let servicesArray: ServicePricingConfig[] = [];
-        if (Array.isArray(data.services)) {
-          servicesArray = data.services;
-        } else if (data.services && typeof data.services === 'object') {
-          const defaultNames: Record<string, string> = {
-            'sunrise-kayaking': 'Sunrise Kayaking',
-            'sunset-kayaking': 'Sun Set Kayaking',
-            'towing': 'Towing',
-            'boating': 'Boating',
-            'fishing': 'Fishing',
-            'bioluminescence-boating': 'Bioluminescence Boating',
-            'bioluminescence-kayaking': 'Bioluminescence Kayaking',
-          };
-          servicesArray = Object.entries(data.services).map(([id, price]) => ({
-            id,
-            name: defaultNames[id] || id.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-            price: Number(price) || 0
-          }));
-        }
-
-        if (servicesArray.length === 0) {
-          servicesArray = [
-            { id: 'sunrise-kayaking', name: 'Sunrise Kayaking', price: 1200 },
-            { id: 'sunset-kayaking', name: 'Sun Set Kayaking', price: 1500 },
-            { id: 'towing', name: 'Towing', price: 800 },
-            { id: 'boating', name: 'Boating', price: 2000 },
-            { id: 'fishing', name: 'Fishing', price: 2500 },
-            { id: 'bioluminescence-boating', name: 'Bioluminescence Boating', price: 1800 },
-            { id: 'bioluminescence-kayaking', name: 'Bioluminescence Kayaking', price: 2200 }
-          ];
-        }
-
-        const normalizedData = {
-          services: servicesArray,
-          addons: data.addons || {},
-        };
-
-        setPrices(normalizedData);
-        setPriceFormServices(servicesArray);
+        setPrices(data);
+        setPriceFormServices(data.services || []);
         
         // Initialize default service row on staff side if none exists
-        if (servicesArray.length > 0 && serviceRows.length === 0) {
-          setServiceRows([{ serviceId: servicesArray[0].id, adults: 1, children: 0 }]);
+        if (data.services && data.services.length > 0 && serviceRows.length === 0) {
+          setServiceRows([{ serviceId: data.services[0].id, adults: 1, children: 0 }]);
         }
       }
     } catch (err) {
@@ -314,7 +325,7 @@ export default function BookingPortal() {
     }
   }, [partner]);
 
-  // Initialize/validate serviceRows when dynamic prices load or update
+  // Sync service rows only when prices update
   useEffect(() => {
     if (prices.services.length > 0) {
       setServiceRows(prev => {
@@ -589,6 +600,7 @@ export default function BookingPortal() {
     }
 
     const dataToExport = bookings.map((b) => ({
+      'Register Number': b.registerNumber || 'N/A',
       'Logged By (Staff)': b.entryUser,
       'Date': new Date(b.createdAt).toLocaleDateString(),
       'Time': new Date(b.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
@@ -603,11 +615,14 @@ export default function BookingPortal() {
       'Addons selected': b.addons.join(', '),
       'Guide Roster': b.guideStaff,
       'Assist Roster': b.assistStaff,
+      'Driver Staff': b.driverStaff || 'N/A',
       'Rate (Base)': b.rate,
       'Advance Paid': b.advance,
+      'Advance Account': b.advanceAccount || 'N/A',
       'Extra Charges (Isolated)': b.extraCharges || 0,
       'Discount Applied': b.discount || 0,
       'Balance Due': b.balance,
+      'Balance Account': b.balanceAccount || 'N/A',
       'Agent Commission': b.commission,
       'Total Paid': b.total,
       'Guest Remarks': b.guestRemarks || '',
@@ -669,6 +684,10 @@ export default function BookingPortal() {
     setServiceRows(updated);
   };
 
+  // Check if Towing or Boating is selected in current services to show Driver inputs
+  const showDriverOption = serviceRows.some(row => row.serviceId.includes('towing') || row.serviceId.includes('boating'));
+  const isDriverCompulsory = serviceRows.some(row => row.serviceId.includes('towing'));
+
   // Financial Calculations
   const rateVal = parseFloat(rate) || 0;
   const advanceVal = parseFloat(advance) || 0;
@@ -706,6 +725,7 @@ export default function BookingPortal() {
   };
 
   const resetForm = () => {
+    setRegisterNumber('');
     setName('');
     setMob('');
     setGuestAdults(1);
@@ -726,8 +746,11 @@ export default function BookingPortal() {
     setStaffRemarks('');
     setGuideStaff('');
     setAssistStaff('');
+    setDriverStaff('');
     setRate('');
     setAdvance('');
+    setAdvanceAccount('');
+    setBalanceAccount('');
     setDiscount('');
     setExtraCharges('');
     setCommission('');
@@ -742,6 +765,11 @@ export default function BookingPortal() {
   const handleSubmitBooking = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!registerNumber.trim()) {
+      showToast('error', 'Please enter the register number');
+      return;
+    }
+
     if (!name.trim()) {
       showToast('error', 'Please enter guest name');
       return;
@@ -749,6 +777,11 @@ export default function BookingPortal() {
 
     if (!mob.trim()) {
       showToast('error', 'Please enter guest mobile number');
+      return;
+    }
+
+    if (guestAdults < 1) {
+      showToast('error', 'Guest Adults head count is compulsory (minimum 1)');
       return;
     }
 
@@ -769,6 +802,16 @@ export default function BookingPortal() {
 
     if (!assistStaff) {
       showToast('error', 'Please select an Assist Staff');
+      return;
+    }
+
+    if (isDriverCompulsory && !driverStaff) {
+      showToast('error', 'Boat Driver Staff is compulsory for Towing');
+      return;
+    }
+
+    if (advanceVal > 0 && !advanceAccount) {
+      showToast('error', 'Advance Paid Account is compulsory when advance payment is made');
       return;
     }
 
@@ -794,6 +837,7 @@ export default function BookingPortal() {
     });
 
     const payload = {
+      registerNumber: registerNumber.trim(),
       entryUser: user?.username || 'System',
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? partnerName : '',
@@ -805,6 +849,8 @@ export default function BookingPortal() {
       addons: selectedAddons.map(addonId => ADDONS.find(a => a.id === addonId)?.name || addonId),
       rate: rateVal,
       advance: advanceVal,
+      advanceAccount: advanceVal > 0 ? advanceAccount : '',
+      balanceAccount: balanceAccount || '',
       discount: discountVal,
       extraCharges: parseFloat(extraCharges) || 0,
       balance: balanceVal,
@@ -812,6 +858,7 @@ export default function BookingPortal() {
       total: totalVal,
       guideStaff,
       assistStaff,
+      driverStaff: showDriverOption ? driverStaff : '',
       customPickupPrice: selectedAddons.includes('pickup-drop') ? (parseFloat(customPickupPrice) || 0) : 0,
       customFoodPrice: selectedAddons.includes('food') ? (parseFloat(customFoodPrice) || 0) : 0,
       customRefreshmentPrice: selectedAddons.includes('refreshment') ? (parseFloat(customRefreshmentPrice) || 0) : 0,
@@ -845,7 +892,241 @@ export default function BookingPortal() {
     }
   };
 
-  // Stepper moved to top/bottom file scope
+  // Toggle Admin Edit Mode inside detailed popup
+  const handleOpenDetailedModal = (booking: BookingRecord) => {
+    setSelectedBookingForDetails(booking);
+    setIsAdminEditing(false);
+
+    // Populate admin edit states
+    setEditRegisterNumber(booking.registerNumber || '');
+    setEditPartner(booking.partner as PartnerType || 'Walk-In');
+    setEditPartnerName(booking.partnerName || '');
+    setEditName(booking.name || '');
+    setEditMob(booking.mob || '');
+    setEditAdults(booking.adults || 1);
+    setEditChildren(booking.children || 0);
+    setEditServiceRows(booking.services.map(s => ({
+      serviceId: s.serviceId,
+      adults: s.adults,
+      children: s.children
+    })));
+
+    // Reconstruct addon selections
+    const activeAddons: string[] = [];
+    if (booking.addons.includes('Pickup and drop')) activeAddons.push('pickup-drop');
+    if (booking.addons.includes('Food')) activeAddons.push('food');
+    if (booking.addons.includes('Refreshment')) activeAddons.push('refreshment');
+    setEditSelectedAddons(activeAddons);
+
+    setEditCustomPickupPrice(booking.customPickupPrice?.toString() || '');
+    setEditCustomFoodPrice(booking.customFoodPrice?.toString() || '');
+    setEditCustomRefreshmentPrice(booking.customRefreshmentPrice?.toString() || '');
+
+    setEditGuideStaff(booking.guideStaff || '');
+    setEditAssistStaff(booking.assistStaff || '');
+    setEditDriverStaff(booking.driverStaff || '');
+    setEditRate(booking.rate?.toString() || '');
+    setEditAdvance(booking.advance?.toString() || '');
+    setEditExtraCharges(booking.extraCharges?.toString() || '');
+    setEditDiscount(booking.discount?.toString() || '');
+    setEditCommission(booking.commission?.toString() || '');
+    setEditAdvanceAccount(booking.advanceAccount || '');
+    setEditBalanceAccount(booking.balanceAccount || '');
+    setEditGuestRemarks(booking.guestRemarks || '');
+    setEditServiceRemarks(booking.serviceRemarks || '');
+    setEditStaffRemarks(booking.staffRemarks || '');
+    setEditLocation(booking.location || '');
+  };
+
+  // Admin Edit calculations
+  useEffect(() => {
+    if (!isAdminEditing) return;
+
+    let totalBaseCalculated = 0;
+    editServiceRows.forEach(row => {
+      const match = prices.services.find(s => s.id === row.serviceId);
+      const basePrice = match ? match.price : 0;
+      const adultCost = basePrice * row.adults;
+      const childCost = basePrice * row.children * 0.5;
+      totalBaseCalculated += (adultCost + childCost);
+    });
+
+    setEditRate(totalBaseCalculated.toString());
+  }, [editServiceRows, prices, isAdminEditing]);
+
+  const editRateVal = parseFloat(editRate) || 0;
+  const editAdvanceVal = parseFloat(editAdvance) || 0;
+  const editDiscountVal = parseFloat(editDiscount) || 0;
+
+  const editPickupVal = editSelectedAddons.includes('pickup-drop') ? (parseFloat(editCustomPickupPrice) || 0) : 0;
+  const editFoodVal = editSelectedAddons.includes('food') ? (parseFloat(editCustomFoodPrice) || 0) : 0;
+  const editRefreshmentVal = editSelectedAddons.includes('refreshment') ? (parseFloat(editCustomRefreshmentPrice) || 0) : 0;
+
+  const editAddonsTotal = editPickupVal + editFoodVal + editRefreshmentVal;
+  const editTotalVal = Math.max(0, editRateVal + editAddonsTotal - editDiscountVal);
+  const editBalanceVal = Math.max(0, editTotalVal - editAdvanceVal);
+
+  const editShowDriverOption = editServiceRows.some(row => row.serviceId.includes('towing') || row.serviceId.includes('boating'));
+  const editIsDriverCompulsory = editServiceRows.some(row => row.serviceId.includes('towing'));
+
+  const handleAdminServiceRowChange = (index: number, key: 'serviceId' | 'adults' | 'children', val: any) => {
+    const updated = [...editServiceRows];
+    updated[index] = {
+      ...updated[index],
+      [key]: val
+    };
+    setEditServiceRows(updated);
+  };
+
+  const handleAdminRemoveServiceRow = (index: number) => {
+    setEditServiceRows(editServiceRows.filter((_, idx) => idx !== index));
+  };
+
+  const handleAdminAddServiceRow = () => {
+    if (prices.services.length > 0) {
+      setEditServiceRows([...editServiceRows, { serviceId: prices.services[0].id, adults: 1, children: 0 }]);
+    }
+  };
+
+  const toggleAdminEditAddon = (id: string) => {
+    setEditSelectedAddons(prev => 
+      prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
+    );
+  };
+
+  // Save admin updates via PUT route
+  const handleSaveBookingEdits = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedBookingForDetails) return;
+
+    if (!editRegisterNumber.trim()) {
+      showToast('error', 'Please enter a register number');
+      return;
+    }
+
+    if (!editName.trim()) {
+      showToast('error', 'Please enter guest name');
+      return;
+    }
+
+    if (!editMob.trim()) {
+      showToast('error', 'Please enter guest mobile number');
+      return;
+    }
+
+    if (editAdults < 1) {
+      showToast('error', 'Guest Adults head count is compulsory (minimum 1)');
+      return;
+    }
+
+    if (!editLocation) {
+      showToast('error', 'Please select a branch location');
+      return;
+    }
+
+    if ((editPartner === 'Partner' || editPartner === 'Broker') && !editPartnerName.trim()) {
+      showToast('error', `Please provide the ${editPartner.toLowerCase()} name`);
+      return;
+    }
+
+    if (!editGuideStaff) {
+      showToast('error', 'Please select a Guide Staff');
+      return;
+    }
+
+    if (!editAssistStaff) {
+      showToast('error', 'Please select an Assist Staff');
+      return;
+    }
+
+    if (editIsDriverCompulsory && !editDriverStaff) {
+      showToast('error', 'Boat Driver Staff is compulsory for Towing');
+      return;
+    }
+
+    if (editAdvanceVal > 0 && !editAdvanceAccount) {
+      showToast('error', 'Advance Paid Account is compulsory when advance payment is made');
+      return;
+    }
+
+    if (editServiceRows.length === 0) {
+      showToast('error', 'Please add at least one service');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const servicesPayload = editServiceRows.map(row => {
+      const originalService = prices.services.find(s => s.id === row.serviceId);
+      const basePrice = originalService ? originalService.price : 0;
+      const computedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
+      return {
+        serviceId: row.serviceId,
+        serviceName: originalService ? originalService.name : row.serviceId,
+        adults: row.adults,
+        children: row.children,
+        rate: computedRowRate
+      };
+    });
+
+    const payload = {
+      id: selectedBookingForDetails._id,
+      registerNumber: editRegisterNumber.trim(),
+      entryUser: selectedBookingForDetails.entryUser,
+      partner: editPartner,
+      partnerName: (editPartner === 'Partner' || editPartner === 'Broker') ? editPartnerName : '',
+      name: editName,
+      mob: editMob,
+      adults: editAdults,
+      children: editChildren,
+      services: servicesPayload,
+      addons: editSelectedAddons.map(addonId => ADDONS.find(a => a.id === addonId)?.name || addonId),
+      rate: editRateVal,
+      advance: editAdvanceVal,
+      advanceAccount: editAdvanceVal > 0 ? editAdvanceAccount : '',
+      balanceAccount: editBalanceAccount || '',
+      discount: editDiscountVal,
+      extraCharges: parseFloat(editExtraCharges) || 0,
+      balance: editBalanceVal,
+      commission: editPartner === 'Walk-In' ? 0 : (parseFloat(editCommission) || 0),
+      total: editTotalVal,
+      guideStaff: editGuideStaff,
+      assistStaff: editAssistStaff,
+      driverStaff: editShowDriverOption ? editDriverStaff : '',
+      customPickupPrice: editSelectedAddons.includes('pickup-drop') ? (parseFloat(editCustomPickupPrice) || 0) : 0,
+      customFoodPrice: editSelectedAddons.includes('food') ? (parseFloat(editCustomFoodPrice) || 0) : 0,
+      customRefreshmentPrice: editSelectedAddons.includes('refreshment') ? (parseFloat(editCustomRefreshmentPrice) || 0) : 0,
+      guestRemarks: editGuestRemarks,
+      serviceRemarks: editServiceRemarks,
+      staffRemarks: editStaffRemarks,
+      location: editLocation,
+    };
+
+    try {
+      const response = await fetch('/api/bookings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        showToast('success', 'Booking updated successfully!');
+        setIsAdminEditing(false);
+        setSelectedBookingForDetails(null);
+        fetchBookings();
+      } else {
+        showToast('error', result.error || 'Failed to update booking');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Connection error updating booking log.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -887,7 +1168,7 @@ export default function BookingPortal() {
                   placeholder="admin or Staff Username"
                   value={usernameInput}
                   onChange={(e) => setUsernameInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500 transition-colors"
+                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500 transition-colors"
                   required
                 />
               </div>
@@ -900,7 +1181,7 @@ export default function BookingPortal() {
                   placeholder="••••••••"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500 transition-colors"
+                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500 transition-colors"
                   required
                 />
               </div>
@@ -963,6 +1244,20 @@ export default function BookingPortal() {
                 <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
                   <Users size={18} className="text-sky-400" />
                   <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">1. Guest Details</h2>
+                </div>
+
+                {/* Register Number Input */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="staff-reg-num" className="text-xs text-zinc-400 font-medium">Register Number</label>
+                  <input
+                    id="staff-reg-num"
+                    type="text"
+                    placeholder="e.g. REG-1001"
+                    value={registerNumber}
+                    onChange={(e) => setRegisterNumber(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                    required
+                  />
                 </div>
 
                 {/* Partner Select */}
@@ -1042,7 +1337,7 @@ export default function BookingPortal() {
                   {/* Main Guest Counter Steppers */}
                   <div className="grid grid-cols-2 gap-3 pt-1">
                     <EditableStepper
-                      label="Guest Adults"
+                      label="Guest Adults (Compulsory)"
                       value={guestAdults}
                       onChange={(val) => setGuestAdults(val)}
                       min={1}
@@ -1262,12 +1557,12 @@ export default function BookingPortal() {
                     placeholder="Remarks regarding selected packages..."
                     value={serviceRemarks}
                     onChange={(e) => setServiceRemarks(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
+                    className="w-full bg-zinc-955 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
                   />
                 </div>
               </div>
 
-              {/* Section 2.5: Staff Assignment for Guide and Assist */}
+              {/* Section 2.5: Staff Assignment for Guide, Assist, and Driver */}
               <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
                   <Briefcase size={18} className="text-sky-400" />
@@ -1282,7 +1577,7 @@ export default function BookingPortal() {
                       value={guideStaff}
                       onChange={(e) => setGuideStaff(e.target.value)}
                       placeholder="Type or select Guide"
-                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
+                      className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
                       required
                     />
                   </div>
@@ -1298,6 +1593,29 @@ export default function BookingPortal() {
                       required
                     />
                   </div>
+
+                  {/* Compulsory/Optional Driver selector for Towing & Boating */}
+                  {showDriverOption && (
+                    <div className="flex flex-col gap-1.5 col-span-2 mt-1 animate-in slide-in-from-top-1 duration-150">
+                      <label htmlFor="staff-driver-input" className="text-xs text-zinc-400 font-semibold flex items-center gap-1">
+                        <span>Boat Driver Staff</span>
+                        {isDriverCompulsory ? (
+                          <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(Compulsory for Towing)</span>
+                        ) : (
+                          <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional for Boating)</span>
+                        )}
+                      </label>
+                      <input
+                        list="staff-list-options"
+                        id="staff-driver-input"
+                        value={driverStaff}
+                        onChange={(e) => setDriverStaff(e.target.value)}
+                        placeholder="Type or select Driver"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                        required={isDriverCompulsory}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Shared Autocomplete Datalist */}
@@ -1332,7 +1650,7 @@ export default function BookingPortal() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-1.5 col-span-2">
                     <label htmlFor="staff-rate" className="text-xs text-zinc-400 font-medium">Rate (Base)</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
@@ -1342,12 +1660,13 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={rate}
                         readOnly
-                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 pl-7 pr-3 text-xs text-zinc-300 font-semibold cursor-not-allowed"
+                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 pl-7 pr-3 text-xs text-zinc-350 font-semibold cursor-not-allowed"
                       />
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
+                  {/* Advance Input & Account Dropdown */}
+                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
                     <label htmlFor="staff-advance" className="text-xs text-zinc-400 font-medium">Advance Paid</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
@@ -1362,6 +1681,28 @@ export default function BookingPortal() {
                     </div>
                   </div>
 
+                  {/* Advance Account selector - compulsory if advance > 0 */}
+                  {advanceVal > 0 && (
+                    <div className="flex flex-col gap-1.5 col-span-2 animate-in slide-in-from-top-1 duration-150">
+                      <label htmlFor="staff-advance-account" className="text-[10px] text-sky-400 font-semibold uppercase">
+                        <span>Advance Paid Account (Compulsory)</span>
+                      </label>
+                      <select
+                        id="staff-advance-account"
+                        value={advanceAccount}
+                        onChange={(e) => setAdvanceAccount(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                        required
+                      >
+                        <option value="">-- Select Staff Account --</option>
+                        {staffNamesList.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Extra Charges Input */}
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="staff-extra-charges" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
                       <span>Extra Charges</span>
@@ -1375,11 +1716,12 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={extraCharges}
                         onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                       />
                     </div>
                   </div>
 
+                  {/* Discount Input */}
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="staff-discount" className="text-xs text-zinc-400 font-medium">Discount</label>
                     <div className="relative">
@@ -1395,7 +1737,8 @@ export default function BookingPortal() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-1.5 col-span-2">
+                  {/* Commission */}
+                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
                     <label htmlFor="staff-commission" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
                       <span>Commission</span>
                       {partner === 'Walk-In' && (
@@ -1418,7 +1761,8 @@ export default function BookingPortal() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-3">
+                  {/* Balance Due Readout & Account */}
+                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
                     <label className="text-xs text-zinc-400 font-medium">Balance Due</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
@@ -1429,6 +1773,24 @@ export default function BookingPortal() {
                         className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2.5 pl-7 pr-3 text-xs text-amber-400 font-bold cursor-not-allowed"
                       />
                     </div>
+                  </div>
+
+                  {/* Balance Account selector */}
+                  <div className="flex flex-col gap-1.5 col-span-2 animate-in slide-in-from-top-1 duration-150">
+                    <label htmlFor="staff-balance-account" className="text-[10px] text-zinc-405 font-semibold uppercase">
+                      <span>Balance Paid Account (Optional)</span>
+                    </label>
+                    <select
+                      id="staff-balance-account"
+                      value={balanceAccount}
+                      onChange={(e) => setBalanceAccount(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                    >
+                      <option value="">-- Select Staff Account --</option>
+                      {staffNamesList.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -1448,7 +1810,7 @@ export default function BookingPortal() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 font-bold py-3.5 rounded-2xl shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-955 font-bold py-3.5 rounded-2xl shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <>
@@ -1469,7 +1831,7 @@ export default function BookingPortal() {
                 <button 
                   type="button" 
                   onClick={fetchBookings} 
-                  className="text-[9px] text-sky-400 hover:text-sky-300 font-semibold"
+                  className="text-[9px] text-sky-400 hover:text-sky-305 font-semibold"
                 >
                   Refresh
                 </button>
@@ -1490,11 +1852,11 @@ export default function BookingPortal() {
                     .map((booking) => (
                       <div 
                         key={booking._id} 
-                        onClick={() => setSelectedBookingForDetails(booking)}
-                        className="bg-zinc-950/40 border border-zinc-900 rounded-lg p-2 flex flex-col gap-0.5 cursor-pointer hover:border-sky-500/30 transition-colors"
+                        onClick={() => handleOpenDetailedModal(booking)}
+                        className="bg-zinc-955 border border-zinc-900 rounded-lg p-2 flex flex-col gap-0.5 cursor-pointer hover:border-sky-500/30 transition-colors"
                       >
                         <div className="flex justify-between text-[10px] font-bold text-zinc-300">
-                          <span>{booking.name} ({booking.location})</span>
+                          <span>{booking.name} ({booking.registerNumber || 'N/A'})</span>
                           <span className="text-sky-400">₹{booking.total}</span>
                         </div>
                         <div className="text-[8px] text-zinc-550 truncate">
@@ -1518,7 +1880,7 @@ export default function BookingPortal() {
             {/* Header */}
             <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
               <div className="flex flex-col">
-                <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider">Pokkalo Controller</span>
+                <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider font-mono">Pokkalo Controller</span>
                 <h1 className="text-base font-black text-white">Admin Console</h1>
               </div>
               <button 
@@ -1613,7 +1975,7 @@ export default function BookingPortal() {
               </h3>
               
               <form onSubmit={handleSavePrices} className="flex flex-col gap-3">
-                <div className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
+                <div className="text-[10px] text-zinc-555 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
                 
                 <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
                   {Array.isArray(priceFormServices) && priceFormServices.map((srv, idx) => (
@@ -1632,7 +1994,7 @@ export default function BookingPortal() {
                           placeholder="Price"
                           value={srv.price}
                           onChange={(e) => handleAdminServiceChange(idx, 'price', parseInt(e.target.value) || 0)}
-                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2 text-xs text-white placeholder-zinc-650 w-20 text-center"
+                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2 text-xs text-white placeholder-zinc-655 w-20 text-center"
                           required
                         />
                         <button
@@ -1690,7 +2052,7 @@ export default function BookingPortal() {
                     placeholder="Password"
                     value={newStaffPassword}
                     onChange={(e) => setNewStaffPassword(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
+                    className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500"
                     required
                   />
                 </div>
@@ -1775,11 +2137,11 @@ export default function BookingPortal() {
                     >
                       {/* Clickable Card Body */}
                       <div 
-                        onClick={() => setSelectedBookingForDetails(booking)}
+                        onClick={() => handleOpenDetailedModal(booking)}
                         className="cursor-pointer flex flex-col gap-1 pr-6"
                       >
                         <div className="flex justify-between items-start">
-                          <span className="font-bold text-zinc-200">{booking.name} ({booking.location})</span>
+                          <span className="font-bold text-zinc-200">{booking.name} ({booking.registerNumber || 'N/A'})</span>
                           <span className="font-black text-emerald-400">₹{booking.total}</span>
                         </div>
                         <div className="text-[9px] text-zinc-400 leading-tight">
@@ -1808,185 +2170,643 @@ export default function BookingPortal() {
           </div>
         )}
 
-        {/* Modal: Detailed Log Entry View */}
+        {/* Modal: Detailed Log Entry View / Admin Editing Modal */}
         {selectedBookingForDetails && (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-            <div className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col gap-4 relative animate-in fade-in zoom-in-95 duration-200">
+            <div className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col gap-4 relative animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
               
               {/* Header */}
               <div className="flex justify-between items-start pb-3 border-b border-zinc-800">
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">Pokkalo Booking Details</span>
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">
+                    {isAdminEditing ? 'Modify Booking Log' : 'Pokkalo Booking Details'}
+                  </span>
                   <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
-                    {selectedBookingForDetails.name}
+                    {isAdminEditing ? 'Editing Form' : selectedBookingForDetails.name}
                   </h3>
                 </div>
-                <button
-                  onClick={() => setSelectedBookingForDetails(null)}
-                  className="text-xs text-zinc-500 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
-                >
-                  Close
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Admin Edit button */}
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={() => setIsAdminEditing(!isAdminEditing)}
+                      className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                        isAdminEditing 
+                          ? 'bg-rose-500/10 border-rose-500 text-rose-455' 
+                          : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-white'
+                      }`}
+                      title={isAdminEditing ? 'Cancel Edit' : 'Edit Booking Log'}
+                    >
+                      {isAdminEditing ? <X size={13} /> : <Edit2 size={13} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setSelectedBookingForDetails(null);
+                      setIsAdminEditing(false);
+                    }}
+                    className="text-xs text-zinc-400 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
 
-              {/* Content Details */}
-              <div className="flex flex-col gap-3 text-xs text-zinc-300 overflow-y-auto max-h-[350px] pr-1">
-                
-                {/* Logging Audit Info */}
-                <div className="bg-zinc-950 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
-                    <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500 text-[10px] font-medium">Branch Location</span>
-                    <span className="text-zinc-200 font-semibold text-sky-400">{selectedBookingForDetails.location || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500 text-[10px] font-medium">Log Date</span>
-                    <span className="text-zinc-400 text-[10px]">{new Date(selectedBookingForDetails.createdAt).toLocaleString()}</span>
-                  </div>
-                </div>
-
-                {/* Guest Details */}
-                <div className="flex flex-col gap-1 pt-1">
-                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Channel</div>
-                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <div className="text-[9px] text-zinc-500">Guest Mobile</div>
-                        <div className="font-semibold text-white">{selectedBookingForDetails.mob}</div>
-                      </div>
-                      <div>
-                        <div className="text-[9px] text-zinc-500">Group Breakdown</div>
-                        <div className="font-semibold text-white">{selectedBookingForDetails.adults} Adults, {selectedBookingForDetails.children} Children</div>
-                      </div>
-                    </div>
-                    <div className="border-t border-zinc-855 pt-1.5 mt-1">
-                      <div className="text-[9px] text-zinc-500">Partner Channel</div>
-                      <div className="font-semibold text-white">
-                        {selectedBookingForDetails.partner} 
-                        {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section Remarks */}
-                {(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks || selectedBookingForDetails.staffRemarks) && (
-                  <div className="flex flex-col gap-1 pt-1">
-                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Log Section Remarks</div>
-                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
-                      {selectedBookingForDetails.guestRemarks && (
-                        <div>
-                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Guest Details</div>
-                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.guestRemarks}"</p>
-                        </div>
-                      )}
-                      {selectedBookingForDetails.serviceRemarks && (
-                        <div className={`${selectedBookingForDetails.guestRemarks ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
-                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Services & Addons</div>
-                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.serviceRemarks}"</p>
-                        </div>
-                      )}
-                      {selectedBookingForDetails.staffRemarks && (
-                        <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
-                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Staff Roster</div>
-                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Staff Assignments */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Staff Roster</div>
-                  <div className="grid grid-cols-2 gap-2 bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60">
-                    <div>
-                      <div className="text-[9px] text-zinc-500">Guide Assigned</div>
-                      <div className="font-semibold text-white">{selectedBookingForDetails.guideStaff}</div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-zinc-500">Assist Assigned</div>
-                      <div className="font-semibold text-white">{selectedBookingForDetails.assistStaff}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Selected Services & Addons */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Services Logs</div>
-                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
-                    <div>
-                      <span className="text-zinc-500 text-[10px]">Activities Roster:</span>
-                      <div className="flex flex-col gap-1 mt-1 pl-1">
-                        {selectedBookingForDetails.services.map((s, idx) => (
-                          <div key={idx} className="flex justify-between text-[10px] text-zinc-300">
-                            <span>&bull; {s.serviceName} (x{s.adults}A, {s.children}C)</span>
-                            <span className="font-semibold text-zinc-400">₹{s.rate}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {selectedBookingForDetails.addons && selectedBookingForDetails.addons.length > 0 && (
-                      <div className="border-t border-zinc-850 pt-1.5 mt-1">
-                        <span className="text-zinc-500 text-[10px]">Add-ons:</span>
-                        <p className="font-semibold text-zinc-200">{selectedBookingForDetails.addons.join(', ')}</p>
-                        {selectedBookingForDetails.customPickupPrice !== undefined && selectedBookingForDetails.customPickupPrice > 0 && (
-                          <span className="text-[9px] text-zinc-400 block">&bull; Pickup cost: ₹{selectedBookingForDetails.customPickupPrice}</span>
-                        )}
-                        {selectedBookingForDetails.customFoodPrice !== undefined && selectedBookingForDetails.customFoodPrice > 0 && (
-                          <span className="text-[9px] text-zinc-400 block">&bull; Food cost: ₹{selectedBookingForDetails.customFoodPrice}</span>
-                        )}
-                        {selectedBookingForDetails.customRefreshmentPrice !== undefined && selectedBookingForDetails.customRefreshmentPrice > 0 && (
-                          <span className="text-[9px] text-zinc-400 block">&bull; Refreshments cost: ₹{selectedBookingForDetails.customRefreshmentPrice}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Pricing breakdown */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Financial Calculations</div>
-                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1">
+              {/* READ-ONLY VIEW MODE */}
+              {!isAdminEditing ? (
+                <div className="flex flex-col gap-3 text-xs text-zinc-300">
+                  
+                  {/* Logging Audit Info */}
+                  <div className="bg-zinc-950 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
                     <div className="flex justify-between">
-                      <span className="text-zinc-500">Base Price (Rate)</span>
-                      <span className="text-white font-medium">₹{selectedBookingForDetails.rate}</span>
+                      <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
+                      <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
                     </div>
-                    {selectedBookingForDetails.extraCharges !== undefined && selectedBookingForDetails.extraCharges > 0 && (
-                      <div className="flex justify-between text-zinc-400">
-                        <span>Extra Charges (Isolated)</span>
-                        <span className="text-amber-400 font-bold">₹{selectedBookingForDetails.extraCharges}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-zinc-400">
-                      <span>Upfront Advance</span>
-                      <span className="text-white font-medium">- ₹{selectedBookingForDetails.advance}</span>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500 text-[10px] font-medium">Register Number</span>
+                      <span className="text-white font-bold">{selectedBookingForDetails.registerNumber || 'N/A'}</span>
                     </div>
-                    {selectedBookingForDetails.discount > 0 && (
-                      <div className="flex justify-between text-zinc-400">
-                        <span>Discount Given</span>
-                        <span className="text-emerald-400 font-medium">- ₹{selectedBookingForDetails.discount}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-855 pt-1 mt-0.5">
-                      <span>Balance Due</span>
-                      <span>₹{selectedBookingForDetails.balance}</span>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500 text-[10px] font-medium">Branch Location</span>
+                      <span className="text-zinc-200 font-semibold text-sky-400">{selectedBookingForDetails.location || 'N/A'}</span>
                     </div>
-                    <div className="flex justify-between text-zinc-400 border-t border-zinc-855 pt-1.5 mt-1">
-                      <span>Agent Commission</span>
-                      <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
-                    </div>
-                    <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-855 pt-1 mt-0.5">
-                      <span>Total Bill (incl. Addons)</span>
-                      <span>₹{selectedBookingForDetails.total}</span>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500 text-[10px] font-medium">Log Date</span>
+                      <span className="text-zinc-400 text-[10px]">{new Date(selectedBookingForDetails.createdAt).toLocaleString()}</span>
                     </div>
                   </div>
-                </div>
 
-              </div>
+                  {/* Guest Details */}
+                  <div className="flex flex-col gap-1 pt-1">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Channel</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-[9px] text-zinc-500">Guest Mobile</div>
+                          <div className="font-semibold text-white">{selectedBookingForDetails.mob}</div>
+                        </div>
+                        <div>
+                          <div className="text-[9px] text-zinc-500">Group Breakdown</div>
+                          <div className="font-semibold text-white">{selectedBookingForDetails.adults} Adults, {selectedBookingForDetails.children} Children</div>
+                        </div>
+                      </div>
+                      <div className="border-t border-zinc-855 pt-1.5 mt-1">
+                        <div className="text-[9px] text-zinc-500">Partner Channel</div>
+                        <div className="font-semibold text-white">
+                          {selectedBookingForDetails.partner} 
+                          {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section Remarks */}
+                  {(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks || selectedBookingForDetails.staffRemarks) && (
+                    <div className="flex flex-col gap-1 pt-1">
+                      <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Log Section Remarks</div>
+                      <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
+                        {selectedBookingForDetails.guestRemarks && (
+                          <div>
+                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Guest Details</div>
+                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.guestRemarks}"</p>
+                          </div>
+                        )}
+                        {selectedBookingForDetails.serviceRemarks && (
+                          <div className={`${selectedBookingForDetails.guestRemarks ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Services & Addons</div>
+                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.serviceRemarks}"</p>
+                          </div>
+                        )}
+                        {selectedBookingForDetails.staffRemarks && (
+                          <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Staff Roster</div>
+                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Staff Assignments */}
+                  <div className="flex flex-col gap-1">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Staff Roster</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-[9px] text-zinc-500">Guide Assigned</div>
+                          <div className="font-semibold text-white">{selectedBookingForDetails.guideStaff}</div>
+                        </div>
+                        <div>
+                          <div className="text-[9px] text-zinc-500">Assist Assigned</div>
+                          <div className="font-semibold text-white">{selectedBookingForDetails.assistStaff}</div>
+                        </div>
+                      </div>
+                      {selectedBookingForDetails.driverStaff && (
+                        <div className="border-t border-zinc-855 pt-1.5">
+                          <div className="text-[9px] text-zinc-500">Boat Driver Staff</div>
+                          <div className="font-semibold text-white">{selectedBookingForDetails.driverStaff}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Selected Services & Addons */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Services Logs</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
+                      <div>
+                        <span className="text-zinc-500 text-[10px]">Activities Roster:</span>
+                        <div className="flex flex-col gap-1 mt-1 pl-1">
+                          {selectedBookingForDetails.services.map((s, idx) => (
+                            <div key={idx} className="flex justify-between text-[10px] text-zinc-300">
+                              <span>&bull; {s.serviceName} (x{s.adults}A, {s.children}C)</span>
+                              <span className="font-semibold text-zinc-400">₹{s.rate}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {selectedBookingForDetails.addons && selectedBookingForDetails.addons.length > 0 && (
+                        <div className="border-t border-zinc-850 pt-1.5 mt-1">
+                          <span className="text-zinc-500 text-[10px]">Add-ons:</span>
+                          <p className="font-semibold text-zinc-200">{selectedBookingForDetails.addons.join(', ')}</p>
+                          {selectedBookingForDetails.customPickupPrice !== undefined && selectedBookingForDetails.customPickupPrice > 0 && (
+                            <span className="text-[9px] text-zinc-400 block">&bull; Pickup cost: ₹{selectedBookingForDetails.customPickupPrice}</span>
+                          )}
+                          {selectedBookingForDetails.customFoodPrice !== undefined && selectedBookingForDetails.customFoodPrice > 0 && (
+                            <span className="text-[9px] text-zinc-400 block">&bull; Food cost: ₹{selectedBookingForDetails.customFoodPrice}</span>
+                          )}
+                          {selectedBookingForDetails.customRefreshmentPrice !== undefined && selectedBookingForDetails.customRefreshmentPrice > 0 && (
+                            <span className="text-[9px] text-zinc-400 block">&bull; Refreshments cost: ₹{selectedBookingForDetails.customRefreshmentPrice}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Pricing breakdown */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Financial Calculations</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Base Price (Rate)</span>
+                        <span className="text-white font-medium">₹{selectedBookingForDetails.rate}</span>
+                      </div>
+                      <div className="flex justify-between text-zinc-400">
+                        <span>Upfront Advance</span>
+                        <span className="text-white font-medium">- ₹{selectedBookingForDetails.advance}</span>
+                      </div>
+                      {selectedBookingForDetails.advanceAccount && (
+                        <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
+                          <span>Advance Account</span>
+                          <span>{selectedBookingForDetails.advanceAccount}</span>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.extraCharges !== undefined && selectedBookingForDetails.extraCharges > 0 && (
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Extra Charges (Isolated)</span>
+                          <span className="text-amber-400 font-bold">₹{selectedBookingForDetails.extraCharges}</span>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.discount > 0 && (
+                        <div className="flex justify-between text-zinc-400">
+                          <span>Discount Given</span>
+                          <span className="text-emerald-400 font-medium">- ₹{selectedBookingForDetails.discount}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-855 pt-1 mt-0.5">
+                        <span>Balance Due</span>
+                        <span>₹{selectedBookingForDetails.balance}</span>
+                      </div>
+                      {selectedBookingForDetails.balanceAccount && (
+                        <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
+                          <span>Balance Account</span>
+                          <span>{selectedBookingForDetails.balanceAccount}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-zinc-400 border-t border-zinc-855 pt-1.5 mt-1">
+                        <span>Agent Commission</span>
+                        <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
+                      </div>
+                      <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-855 pt-1 mt-0.5">
+                        <span>Total Bill (incl. Addons)</span>
+                        <span>₹{selectedBookingForDetails.total}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              ) : (
+                
+                /* ADMIN INLINE EDIT FORM */
+                <form onSubmit={handleSaveBookingEdits} className="flex flex-col gap-4 text-xs">
+                  
+                  {/* Guest Details */}
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">1. Edit Guest Info</span>
+                    
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-450 font-medium">Register Number</label>
+                      <input
+                        type="text"
+                        value={editRegisterNumber}
+                        onChange={(e) => setEditRegisterNumber(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-450 font-medium">Partner Type</label>
+                      <select
+                        value={editPartner}
+                        onChange={(e) => setEditPartner(e.target.value as PartnerType)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      >
+                        {PARTNER_TYPES.map(type => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {(editPartner === 'Partner' || editPartner === 'Broker') && (
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">{editPartner} Name</label>
+                        <input
+                          type="text"
+                          value={editPartnerName}
+                          onChange={(e) => setEditPartnerName(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-450 font-medium">Guest Name</label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-450 font-medium">Guest Phone</label>
+                      <input
+                        type="tel"
+                        value={editMob}
+                        onChange={(e) => setEditMob(e.target.value.replace(/[^0-9+]/g, ''))}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <EditableStepper
+                        label="Adults"
+                        value={editAdults}
+                        onChange={(val) => setEditAdults(val)}
+                        min={1}
+                      />
+                      <EditableStepper
+                        label="Children"
+                        value={editChildren}
+                        onChange={(val) => setEditChildren(val)}
+                        min={0}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Services Selection */}
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">2. Edit Services & Branch</span>
+                    
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-450 font-medium">Branch Location</label>
+                      <select
+                        value={editLocation}
+                        onChange={(e) => setEditLocation(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required
+                      >
+                        {locationsList.map(loc => (
+                          <option key={loc._id} value={loc.name}>{loc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-2.5 mt-1">
+                      {editServiceRows.map((row, index) => {
+                        const match = prices.services.find(s => s.id === row.serviceId);
+                        const basePrice = match ? match.price : 0;
+                        const rowCost = (basePrice * row.adults) + (basePrice * row.children * 0.5);
+
+                        return (
+                          <div key={index} className="bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-850 flex flex-col gap-2 relative">
+                            <div className="flex justify-between items-center gap-1.5">
+                              <select
+                                value={row.serviceId}
+                                onChange={(e) => handleAdminServiceRowChange(index, 'serviceId', e.target.value)}
+                                className="bg-zinc-900 border border-zinc-800 rounded p-1 text-[10px] text-white w-full"
+                              >
+                                {prices.services.map(s => (
+                                  <option key={s.id} value={s.id}>{s.name} (₹{s.price})</option>
+                                ))}
+                              </select>
+                              {editServiceRows.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdminRemoveServiceRow(index)}
+                                  className="text-rose-500 p-1"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <EditableStepper
+                                label="Adults"
+                                value={row.adults}
+                                onChange={(v) => handleAdminServiceRowChange(index, 'adults', v)}
+                                min={0}
+                              />
+                              <EditableStepper
+                                label="Children"
+                                value={row.children}
+                                onChange={(v) => handleAdminServiceRowChange(index, 'children', v)}
+                                min={0}
+                              />
+                            </div>
+                            <div className="text-right text-[8px] text-zinc-500">
+                              Cost: ₹{rowCost}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={handleAdminAddServiceRow}
+                        className="py-1 border border-dashed border-sky-500/20 text-[10px] text-sky-400 hover:bg-zinc-900 rounded"
+                      >
+                        + Add Service
+                      </button>
+                    </div>
+
+                    {/* Addons editing */}
+                    <div className="flex flex-col gap-2 pt-2 border-t border-zinc-900">
+                      <label className="text-[10px] text-zinc-450 font-medium">Extra Add-ons</label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {ADDONS.map(addon => {
+                          const isSel = editSelectedAddons.includes(addon.id);
+                          return (
+                            <button
+                              key={addon.id}
+                              type="button"
+                              onClick={() => toggleAdminEditAddon(addon.id)}
+                              className={`p-1.5 rounded text-[9px] font-bold border transition-all ${
+                                isSel ? 'bg-sky-500/10 border-sky-500 text-sky-400' : 'bg-zinc-900 border-zinc-850 text-zinc-550'
+                              }`}
+                            >
+                              {addon.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {editSelectedAddons.includes('pickup-drop') && (
+                        <input
+                          type="number"
+                          placeholder="Pickup/Drop Price (₹)"
+                          value={editCustomPickupPrice}
+                          onChange={(e) => setEditCustomPickupPrice(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
+                          required
+                        />
+                      )}
+                      {editSelectedAddons.includes('food') && (
+                        <input
+                          type="number"
+                          placeholder="Food Price (₹)"
+                          value={editCustomFoodPrice}
+                          onChange={(e) => setEditCustomFoodPrice(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
+                          required
+                        />
+                      )}
+                      {editSelectedAddons.includes('refreshment') && (
+                        <input
+                          type="number"
+                          placeholder="Refreshment Price (₹)"
+                          value={editCustomRefreshmentPrice}
+                          onChange={(e) => setEditCustomRefreshmentPrice(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
+                          required
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Staff Assigned */}
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">3. Edit Staff Roster</span>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Guide</label>
+                        <input
+                          list="edit-staff-list"
+                          value={editGuideStaff}
+                          onChange={(e) => setEditGuideStaff(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5"
+                          required
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Assist</label>
+                        <input
+                          list="edit-staff-list"
+                          value={editAssistStaff}
+                          onChange={(e) => setEditAssistStaff(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {editShowDriverOption && (
+                      <div className="flex flex-col gap-1 mt-1">
+                        <label className="text-[10px] text-zinc-450 font-medium flex items-center justify-between">
+                          <span>Driver Staff</span>
+                          {editIsDriverCompulsory && (
+                            <span className="text-[7px] text-rose-500 font-bold">(Compulsory)</span>
+                          )}
+                        </label>
+                        <input
+                          list="edit-staff-list"
+                          value={editDriverStaff}
+                          onChange={(e) => setEditDriverStaff(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5 w-full"
+                          required={editIsDriverCompulsory}
+                        />
+                      </div>
+                    )}
+
+                    <datalist id="edit-staff-list">
+                      {staffNamesList.map(name => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  {/* Financial & Accounts */}
+                  <div className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">4. Edit Payments</span>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Rate (Base)</label>
+                        <input
+                          type="number"
+                          value={editRate}
+                          readOnly
+                          className="bg-zinc-900/50 border border-zinc-900 rounded p-1 text-zinc-450"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Discount</label>
+                        <input
+                          type="number"
+                          value={editDiscount}
+                          onChange={(e) => setEditDiscount(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Extra Charges</label>
+                        <input
+                          type="number"
+                          value={editExtraCharges}
+                          onChange={(e) => setEditExtraCharges(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] text-zinc-450 font-medium">Commission</label>
+                        <input
+                          type="number"
+                          value={editCommission}
+                          onChange={(e) => setEditCommission(e.target.value)}
+                          disabled={editPartner === 'Walk-In'}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 disabled:opacity-40"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
+                        <label className="text-[10px] text-zinc-450 font-medium">Advance Paid</label>
+                        <input
+                          type="number"
+                          value={editAdvance}
+                          onChange={(e) => setEditAdvance(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 w-full"
+                        />
+                      </div>
+
+                      {editAdvanceVal > 0 && (
+                        <div className="flex flex-col gap-1 col-span-2">
+                          <label className="text-[10px] text-sky-400 font-semibold uppercase">Advance Paid Account</label>
+                          <select
+                            value={editAdvanceAccount}
+                            onChange={(e) => setEditAdvanceAccount(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded p-1 text-xs text-white"
+                            required
+                          >
+                            <option value="">-- Select --</option>
+                            {staffNamesList.map(name => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
+                        <label className="text-[10px] text-zinc-450 font-medium">Balance Due Readout</label>
+                        <input
+                          type="number"
+                          value={editBalanceVal}
+                          readOnly
+                          className="bg-zinc-900/50 border border-zinc-900 rounded p-1 text-amber-500 font-semibold"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1 col-span-2">
+                        <label className="text-[10px] text-zinc-405 font-semibold uppercase">Balance Paid Account</label>
+                        <select
+                          value={editBalanceAccount}
+                          onChange={(e) => setEditBalanceAccount(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-xs text-white"
+                        >
+                          <option value="">-- Select --</option>
+                          {staffNamesList.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-sky-500/10 border border-sky-500/25 p-2 rounded-lg flex justify-between items-center mt-2">
+                      <span className="text-[9px] text-sky-400 font-bold uppercase">Total Bill</span>
+                      <span className="text-sm font-black text-white">₹{editTotalVal}</span>
+                    </div>
+                  </div>
+
+                  {/* Remarks */}
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2">
+                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">5. Edit Remarks</span>
+                    
+                    <input
+                      type="text"
+                      placeholder="Guest Details Remarks"
+                      value={editGuestRemarks}
+                      onChange={(e) => setEditGuestRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded p-1"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Service Details Remarks"
+                      value={editServiceRemarks}
+                      onChange={(e) => setEditServiceRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded p-1 mt-1"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Staff Assigned Remarks"
+                      value={editStaffRemarks}
+                      onChange={(e) => setEditStaffRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded p-1 mt-1"
+                    />
+                  </div>
+
+                  {/* Submit updates */}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 bg-sky-500 text-zinc-950 hover:bg-sky-400 text-xs font-black rounded-xl shadow-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Save size={13} />
+                    )}
+                    <span>Save Updates</span>
+                  </button>
+
+                </form>
+              )}
 
             </div>
           </div>
