@@ -67,8 +67,8 @@ interface BookingRecord {
   balance: number;
   commission: number;
   total: number;
-  guideStaff: string;
-  assistStaff: string;
+  guideStaff: string[];
+  assistStaff: string[];
   driverStaff?: string;
   advanceAccount?: string;
   balanceAccount?: string;
@@ -136,13 +136,12 @@ export default function BookingPortal() {
   const [selectedLocation, setSelectedLocation] = useState('');
   const [newLocationName, setNewLocationName] = useState('');
 
-  // Staff Assignment State
-  const [guideStaff, setGuideStaff] = useState('');
-  const [assistStaff, setAssistStaff] = useState('');
+  // Staff Assignment State (Tag arrays)
+  const [guideStaff, setGuideStaff] = useState<string[]>([]);
+  const [assistStaff, setAssistStaff] = useState<string[]>([]);
   const [driverStaff, setDriverStaff] = useState('');
 
   // Form Fields State (Staff view)
-  const [registerNumber, setRegisterNumber] = useState('');
   const [partner, setPartner] = useState<PartnerType>('Walk-In');
   const [partnerName, setPartnerName] = useState('');
   const [name, setName] = useState('');
@@ -216,8 +215,8 @@ export default function BookingPortal() {
   const [editCustomPickupPrice, setEditCustomPickupPrice] = useState<string>('');
   const [editCustomFoodPrice, setEditCustomFoodPrice] = useState<string>('');
   const [editCustomRefreshmentPrice, setEditCustomRefreshmentPrice] = useState<string>('');
-  const [editGuideStaff, setEditGuideStaff] = useState('');
-  const [editAssistStaff, setEditAssistStaff] = useState('');
+  const [editGuideStaff, setEditGuideStaff] = useState<string[]>([]);
+  const [editAssistStaff, setEditAssistStaff] = useState<string[]>([]);
   const [editDriverStaff, setEditDriverStaff] = useState('');
   const [editRate, setEditRate] = useState<string>('');
   const [editAdvance, setEditAdvance] = useState<string>('');
@@ -613,8 +612,8 @@ export default function BookingPortal() {
       'Branch Location': b.location || 'N/A',
       'Services Details Summary': b.services.map(s => `${s.serviceName} (A:${s.adults}, C:${s.children})`).join(' | '),
       'Addons selected': b.addons.join(', '),
-      'Guide Roster': b.guideStaff,
-      'Assist Roster': b.assistStaff,
+      'Guides Assigned': Array.isArray(b.guideStaff) ? b.guideStaff.join(', ') : (b.guideStaff || 'N/A'),
+      'Assistants Assigned': Array.isArray(b.assistStaff) ? b.assistStaff.join(', ') : (b.assistStaff || 'N/A'),
       'Driver Staff': b.driverStaff || 'N/A',
       'Rate (Base)': b.rate,
       'Advance Paid': b.advance,
@@ -724,8 +723,21 @@ export default function BookingPortal() {
     );
   };
 
+  // Toggle Guide selection list helper
+  const handleToggleGuide = (name: string) => {
+    setGuideStaff(prev => 
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
+
+  // Toggle Assist selection list helper
+  const handleToggleAssist = (name: string) => {
+    setAssistStaff(prev => 
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
+
   const resetForm = () => {
-    setRegisterNumber('');
     setName('');
     setMob('');
     setGuestAdults(1);
@@ -744,8 +756,8 @@ export default function BookingPortal() {
     setGuestRemarks('');
     setServiceRemarks('');
     setStaffRemarks('');
-    setGuideStaff('');
-    setAssistStaff('');
+    setGuideStaff([]);
+    setAssistStaff([]);
     setDriverStaff('');
     setRate('');
     setAdvance('');
@@ -764,11 +776,6 @@ export default function BookingPortal() {
   // Submit Booking Form
   const handleSubmitBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!registerNumber.trim()) {
-      showToast('error', 'Please enter the register number');
-      return;
-    }
 
     if (!name.trim()) {
       showToast('error', 'Please enter guest name');
@@ -795,13 +802,8 @@ export default function BookingPortal() {
       return;
     }
 
-    if (!guideStaff) {
-      showToast('error', 'Please select a Guide Staff');
-      return;
-    }
-
-    if (!assistStaff) {
-      showToast('error', 'Please select an Assist Staff');
+    if (guideStaff.length === 0) {
+      showToast('error', 'Please select at least one Guide Staff');
       return;
     }
 
@@ -812,6 +814,11 @@ export default function BookingPortal() {
 
     if (advanceVal > 0 && !advanceAccount) {
       showToast('error', 'Advance Paid Account is compulsory when advance payment is made');
+      return;
+    }
+
+    if (!balanceAccount) {
+      showToast('error', 'Balance Paid Account is compulsory');
       return;
     }
 
@@ -837,7 +844,6 @@ export default function BookingPortal() {
     });
 
     const payload = {
-      registerNumber: registerNumber.trim(),
       entryUser: user?.username || 'System',
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? partnerName : '',
@@ -850,14 +856,14 @@ export default function BookingPortal() {
       rate: rateVal,
       advance: advanceVal,
       advanceAccount: advanceVal > 0 ? advanceAccount : '',
-      balanceAccount: balanceAccount || '',
+      balanceAccount,
       discount: discountVal,
       extraCharges: parseFloat(extraCharges) || 0,
       balance: balanceVal,
       commission: partner === 'Walk-In' ? 0 : (parseFloat(commission) || 0),
       total: totalVal,
-      guideStaff,
-      assistStaff,
+      guideStaff, // Tag array of strings
+      assistStaff, // Tag array of strings
       driverStaff: showDriverOption ? driverStaff : '',
       customPickupPrice: selectedAddons.includes('pickup-drop') ? (parseFloat(customPickupPrice) || 0) : 0,
       customFoodPrice: selectedAddons.includes('food') ? (parseFloat(customFoodPrice) || 0) : 0,
@@ -878,7 +884,7 @@ export default function BookingPortal() {
       const result = await response.json();
 
       if (response.ok) {
-        showToast('success', 'Booking submitted successfully!');
+        showToast('success', `Booking submitted! Assigned ${result.registerNumber}`);
         resetForm();
         fetchBookings();
       } else {
@@ -922,8 +928,8 @@ export default function BookingPortal() {
     setEditCustomFoodPrice(booking.customFoodPrice?.toString() || '');
     setEditCustomRefreshmentPrice(booking.customRefreshmentPrice?.toString() || '');
 
-    setEditGuideStaff(booking.guideStaff || '');
-    setEditAssistStaff(booking.assistStaff || '');
+    setEditGuideStaff(Array.isArray(booking.guideStaff) ? booking.guideStaff : booking.guideStaff ? [booking.guideStaff] : []);
+    setEditAssistStaff(Array.isArray(booking.assistStaff) ? booking.assistStaff : booking.assistStaff ? [booking.assistStaff] : []);
     setEditDriverStaff(booking.driverStaff || '');
     setEditRate(booking.rate?.toString() || '');
     setEditAdvance(booking.advance?.toString() || '');
@@ -994,6 +1000,18 @@ export default function BookingPortal() {
     );
   };
 
+  const handleAdminToggleGuide = (name: string) => {
+    setEditGuideStaff(prev => 
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
+
+  const handleAdminToggleAssist = (name: string) => {
+    setEditAssistStaff(prev => 
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
+
   // Save admin updates via PUT route
   const handleSaveBookingEdits = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1030,13 +1048,8 @@ export default function BookingPortal() {
       return;
     }
 
-    if (!editGuideStaff) {
-      showToast('error', 'Please select a Guide Staff');
-      return;
-    }
-
-    if (!editAssistStaff) {
-      showToast('error', 'Please select an Assist Staff');
+    if (editGuideStaff.length === 0) {
+      showToast('error', 'Please select at least one Guide Staff');
       return;
     }
 
@@ -1047,6 +1060,11 @@ export default function BookingPortal() {
 
     if (editAdvanceVal > 0 && !editAdvanceAccount) {
       showToast('error', 'Advance Paid Account is compulsory when advance payment is made');
+      return;
+    }
+
+    if (!editBalanceAccount) {
+      showToast('error', 'Balance Paid Account is compulsory');
       return;
     }
 
@@ -1085,7 +1103,7 @@ export default function BookingPortal() {
       rate: editRateVal,
       advance: editAdvanceVal,
       advanceAccount: editAdvanceVal > 0 ? editAdvanceAccount : '',
-      balanceAccount: editBalanceAccount || '',
+      balanceAccount: editBalanceAccount,
       discount: editDiscountVal,
       extraCharges: parseFloat(editExtraCharges) || 0,
       balance: editBalanceVal,
@@ -1189,7 +1207,7 @@ export default function BookingPortal() {
               <button
                 type="submit"
                 disabled={authLoading}
-                className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-950 font-bold py-3.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 mt-2 shadow-md cursor-pointer"
+                className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-955 font-bold py-3.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 mt-2 shadow-md cursor-pointer"
               >
                 {authLoading ? <Loader2 size={16} className="animate-spin" /> : <span>Sign In</span>}
               </button>
@@ -1209,7 +1227,7 @@ export default function BookingPortal() {
                 Seed Default Staff Accounts
               </button>
               {seedStatus && (
-                <div className="p-2.5 bg-zinc-950 border border-zinc-900 rounded-lg text-[10px] text-emerald-400 break-words leading-normal text-center">
+                <div className="p-2.5 bg-zinc-955 border border-zinc-900 rounded-lg text-[10px] text-emerald-400 break-words leading-normal text-center">
                   {seedStatus}
                 </div>
               )}
@@ -1244,20 +1262,6 @@ export default function BookingPortal() {
                 <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
                   <Users size={18} className="text-sky-400" />
                   <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">1. Guest Details</h2>
-                </div>
-
-                {/* Register Number Input */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="staff-reg-num" className="text-xs text-zinc-400 font-medium">Register Number</label>
-                  <input
-                    id="staff-reg-num"
-                    type="text"
-                    placeholder="e.g. REG-1001"
-                    value={registerNumber}
-                    onChange={(e) => setRegisterNumber(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
-                    required
-                  />
                 </div>
 
                 {/* Partner Select */}
@@ -1353,7 +1357,7 @@ export default function BookingPortal() {
 
                 {/* Section Remarks: Guest Details */}
                 <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-guest-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                  <label htmlFor="staff-guest-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
                     <MessageSquare size={10} />
                     <span>Remarks (Guest Details)</span>
                   </label>
@@ -1547,7 +1551,7 @@ export default function BookingPortal() {
 
                 {/* Section Remarks: Services */}
                 <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-service-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                  <label htmlFor="staff-service-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
                     <MessageSquare size={10} />
                     <span>Remarks (Services & Add-ons)</span>
                   </label>
@@ -1568,35 +1572,66 @@ export default function BookingPortal() {
                   <Briefcase size={18} className="text-sky-400" />
                   <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Staff Assigned</h2>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-guide-input" className="text-xs text-zinc-400 font-medium">Guide Staff</label>
-                    <input
-                      list="staff-list-options"
-                      id="staff-guide-input"
-                      value={guideStaff}
-                      onChange={(e) => setGuideStaff(e.target.value)}
-                      placeholder="Type or select Guide"
-                      className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                      required
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-assist-input" className="text-xs text-zinc-400 font-medium">Assist Staff</label>
-                    <input
-                      list="staff-list-options"
-                      id="staff-assist-input"
-                      value={assistStaff}
-                      onChange={(e) => setAssistStaff(e.target.value)}
-                      placeholder="Type or select Assist"
-                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                      required
-                    />
+                
+                <div className="flex flex-col gap-3">
+                  
+                  {/* Multi-Select Guide tag checklist */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
+                      <span>Guide Staff (Select Multiple)</span>
+                      <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(Compulsory)</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-950 p-2 rounded-xl border border-zinc-900">
+                      {staffNamesList.map(name => {
+                        const isSelected = guideStaff.includes(name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => handleToggleGuide(name)}
+                            className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                              isSelected 
+                                ? 'bg-sky-500 text-zinc-950 border-sky-500 shadow-md shadow-sky-500/10' 
+                                : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-zinc-200'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Compulsory/Optional Driver selector for Towing & Boating */}
+                  {/* Multi-Select Assist tag checklist */}
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
+                      <span>Assist Staff (Select Multiple)</span>
+                      <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional)</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-950 p-2 rounded-xl border border-zinc-900">
+                      {staffNamesList.map(name => {
+                        const isSelected = assistStaff.includes(name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => handleToggleAssist(name)}
+                            className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                              isSelected 
+                                ? 'bg-sky-500 text-zinc-950 border-sky-500 shadow-md shadow-sky-500/10' 
+                                : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-zinc-200'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Optional/Compulsory Driver selector for Towing & Boating */}
                   {showDriverOption && (
-                    <div className="flex flex-col gap-1.5 col-span-2 mt-1 animate-in slide-in-from-top-1 duration-150">
+                    <div className="flex flex-col gap-1.5 mt-1 animate-in slide-in-from-top-1 duration-150">
                       <label htmlFor="staff-driver-input" className="text-xs text-zinc-400 font-semibold flex items-center gap-1">
                         <span>Boat Driver Staff</span>
                         {isDriverCompulsory ? (
@@ -1605,29 +1640,25 @@ export default function BookingPortal() {
                           <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional for Boating)</span>
                         )}
                       </label>
-                      <input
-                        list="staff-list-options"
+                      <select
                         id="staff-driver-input"
                         value={driverStaff}
                         onChange={(e) => setDriverStaff(e.target.value)}
-                        placeholder="Type or select Driver"
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
                         required={isDriverCompulsory}
-                      />
+                      >
+                        <option value="">-- Select Driver --</option>
+                        {staffNamesList.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>
 
-                {/* Shared Autocomplete Datalist */}
-                <datalist id="staff-list-options">
-                  {staffNamesList.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-
                 {/* Section Remarks: Staff Assigned */}
                 <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
                     <MessageSquare size={10} />
                     <span>Remarks (Staff Assigned)</span>
                   </label>
@@ -1716,7 +1747,7 @@ export default function BookingPortal() {
                         placeholder="0"
                         value={extraCharges}
                         onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                       />
                     </div>
                   </div>
@@ -1775,16 +1806,17 @@ export default function BookingPortal() {
                     </div>
                   </div>
 
-                  {/* Balance Account selector */}
+                  {/* Balance Account selector - Compulsory */}
                   <div className="flex flex-col gap-1.5 col-span-2 animate-in slide-in-from-top-1 duration-150">
-                    <label htmlFor="staff-balance-account" className="text-[10px] text-zinc-405 font-semibold uppercase">
-                      <span>Balance Paid Account (Optional)</span>
+                    <label htmlFor="staff-balance-account" className="text-[10px] text-sky-400 font-semibold uppercase">
+                      <span>Balance Paid Account (Compulsory)</span>
                     </label>
                     <select
                       id="staff-balance-account"
                       value={balanceAccount}
                       onChange={(e) => setBalanceAccount(e.target.value)}
                       className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                      required
                     >
                       <option value="">-- Select Staff Account --</option>
                       {staffNamesList.map(name => (
@@ -1863,7 +1895,7 @@ export default function BookingPortal() {
                           Services: {booking.services.map(s => s.serviceName).join(', ')}
                         </div>
                         <div className="flex justify-between text-[7px] text-zinc-650 mt-1">
-                          <span>Staff: Guide: {booking.guideStaff} | Assist: {booking.assistStaff}</span>
+                          <span>Staff: Guide: {Array.isArray(booking.guideStaff) ? booking.guideStaff.join(', ') : booking.guideStaff}</span>
                           <span>{booking.partner}</span>
                         </div>
                       </div>
@@ -1885,7 +1917,7 @@ export default function BookingPortal() {
               </div>
               <button 
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 hover:bg-zinc-850 text-[10px] font-semibold text-zinc-400 py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 hover:bg-zinc-855 text-[10px] font-semibold text-zinc-400 py-1.5 px-3 rounded-lg transition-all cursor-pointer"
               >
                 <LogOut size={12} />
                 <span>Log Out</span>
@@ -1947,7 +1979,7 @@ export default function BookingPortal() {
 
               {/* List Locations */}
               {locationsList.length === 0 ? (
-                <div className="text-center py-2 text-[10px] text-zinc-650">No locations configured. Add branch above.</div>
+                <div className="text-center py-2 text-[10px] text-zinc-655">No locations configured. Add branch above.</div>
               ) : (
                 <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
                   {locationsList.map((loc) => (
@@ -1975,7 +2007,7 @@ export default function BookingPortal() {
               </h3>
               
               <form onSubmit={handleSavePrices} className="flex flex-col gap-3">
-                <div className="text-[10px] text-zinc-555 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
+                <div className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
                 
                 <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
                   {Array.isArray(priceFormServices) && priceFormServices.map((srv, idx) => (
@@ -2147,9 +2179,9 @@ export default function BookingPortal() {
                         <div className="text-[9px] text-zinc-400 leading-tight">
                           <strong>Services:</strong> {booking.services.map(s => `${s.serviceName} (x${s.adults}A, ${s.children}C)`).join(', ')}
                         </div>
-                        <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-500 border-t border-zinc-900/60 pt-1 mt-1">
-                          <span>By: <strong className="text-zinc-400">{booking.entryUser}</strong> ({booking.partner})</span>
-                          <span className="text-right">Adv: ₹{booking.advance} | Bal: ₹{booking.balance}</span>
+                        <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-550 border-t border-zinc-900/60 pt-1 mt-1 font-semibold">
+                          <span>Guides: {Array.isArray(booking.guideStaff) ? booking.guideStaff.join(', ') : booking.guideStaff}</span>
+                          <span className="text-right text-sky-400">Total: ₹{booking.total}</span>
                         </div>
                       </div>
 
@@ -2217,7 +2249,7 @@ export default function BookingPortal() {
                 <div className="flex flex-col gap-3 text-xs text-zinc-300">
                   
                   {/* Logging Audit Info */}
-                  <div className="bg-zinc-950 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
+                  <div className="bg-zinc-955 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
                     <div className="flex justify-between">
                       <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
                       <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
@@ -2279,7 +2311,7 @@ export default function BookingPortal() {
                         )}
                         {selectedBookingForDetails.staffRemarks && (
                           <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
-                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Staff Roster</div>
+                            <div className="text-[8px] text-zinc-550 uppercase tracking-wide">Staff Roster</div>
                             <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
                           </div>
                         )}
@@ -2293,12 +2325,20 @@ export default function BookingPortal() {
                     <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <div className="text-[9px] text-zinc-500">Guide Assigned</div>
-                          <div className="font-semibold text-white">{selectedBookingForDetails.guideStaff}</div>
+                          <div className="text-[9px] text-zinc-500">Guides Assigned</div>
+                          <div className="font-semibold text-white">
+                            {Array.isArray(selectedBookingForDetails.guideStaff) 
+                              ? selectedBookingForDetails.guideStaff.join(', ') 
+                              : selectedBookingForDetails.guideStaff || 'N/A'}
+                          </div>
                         </div>
                         <div>
-                          <div className="text-[9px] text-zinc-500">Assist Assigned</div>
-                          <div className="font-semibold text-white">{selectedBookingForDetails.assistStaff}</div>
+                          <div className="text-[9px] text-zinc-500">Assistants Assigned</div>
+                          <div className="font-semibold text-white">
+                            {Array.isArray(selectedBookingForDetails.assistStaff) 
+                              ? selectedBookingForDetails.assistStaff.join(', ') 
+                              : selectedBookingForDetails.assistStaff || 'None'}
+                          </div>
                         </div>
                       </div>
                       {selectedBookingForDetails.driverStaff && (
@@ -2484,7 +2524,7 @@ export default function BookingPortal() {
                     <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">2. Edit Services & Branch</span>
                     
                     <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-450 font-medium">Branch Location</label>
+                      <label className="text-[10px] text-zinc-455 font-medium">Branch Location</label>
                       <select
                         value={editLocation}
                         onChange={(e) => setEditLocation(e.target.value)}
@@ -2556,7 +2596,7 @@ export default function BookingPortal() {
 
                     {/* Addons editing */}
                     <div className="flex flex-col gap-2 pt-2 border-t border-zinc-900">
-                      <label className="text-[10px] text-zinc-450 font-medium">Extra Add-ons</label>
+                      <label className="text-[10px] text-zinc-455 font-medium">Extra Add-ons</label>
                       <div className="grid grid-cols-3 gap-1.5">
                         {ADDONS.map(addon => {
                           const isSel = editSelectedAddons.includes(addon.id);
@@ -2609,55 +2649,74 @@ export default function BookingPortal() {
                   </div>
 
                   {/* Staff Assigned */}
-                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                  <div className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
                     <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">3. Edit Staff Roster</span>
                     
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Guide</label>
-                        <input
-                          list="edit-staff-list"
-                          value={editGuideStaff}
-                          onChange={(e) => setEditGuideStaff(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5"
-                          required
-                        />
+                    {/* Admin Multi-Select Guide tag list */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-400 font-semibold">Guides Assigned</label>
+                      <div className="flex flex-wrap gap-1 mt-1 bg-zinc-900 p-2 rounded-lg border border-zinc-850">
+                        {staffNamesList.map(name => {
+                          const isSel = editGuideStaff.includes(name);
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => handleAdminToggleGuide(name)}
+                              className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${
+                                isSel ? 'bg-sky-500 text-zinc-950 border-sky-500' : 'bg-zinc-950 border-zinc-900 text-zinc-400'
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })}
                       </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Assist</label>
-                        <input
-                          list="edit-staff-list"
-                          value={editAssistStaff}
-                          onChange={(e) => setEditAssistStaff(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5"
-                          required
-                        />
+                    </div>
+
+                    {/* Admin Multi-Select Assist tag list */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-400 font-semibold">Assistants Assigned</label>
+                      <div className="flex flex-wrap gap-1 mt-1 bg-zinc-900 p-2 rounded-lg border border-zinc-850">
+                        {staffNamesList.map(name => {
+                          const isSel = editAssistStaff.includes(name);
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => handleAdminToggleAssist(name)}
+                              className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${
+                                isSel ? 'bg-sky-500 text-zinc-950 border-sky-500' : 'bg-zinc-950 border-zinc-900 text-zinc-400'
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
                     {editShowDriverOption && (
                       <div className="flex flex-col gap-1 mt-1">
-                        <label className="text-[10px] text-zinc-450 font-medium flex items-center justify-between">
+                        <label className="text-[10px] text-zinc-405 font-medium flex items-center justify-between">
                           <span>Driver Staff</span>
                           {editIsDriverCompulsory && (
                             <span className="text-[7px] text-rose-500 font-bold">(Compulsory)</span>
                           )}
                         </label>
-                        <input
-                          list="edit-staff-list"
+                        <select
                           value={editDriverStaff}
                           onChange={(e) => setEditDriverStaff(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5 w-full"
+                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5 text-xs text-white"
                           required={editIsDriverCompulsory}
-                        />
+                        >
+                          <option value="">-- Select Driver --</option>
+                          {staffNamesList.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
                       </div>
                     )}
-
-                    <datalist id="edit-staff-list">
-                      {staffNamesList.map(name => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
                   </div>
 
                   {/* Financial & Accounts */}
@@ -2666,7 +2725,7 @@ export default function BookingPortal() {
 
                     <div className="grid grid-cols-2 gap-2">
                       <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Rate (Base)</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Rate (Base)</label>
                         <input
                           type="number"
                           value={editRate}
@@ -2676,7 +2735,7 @@ export default function BookingPortal() {
                       </div>
 
                       <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Discount</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Discount</label>
                         <input
                           type="number"
                           value={editDiscount}
@@ -2686,7 +2745,7 @@ export default function BookingPortal() {
                       </div>
 
                       <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Extra Charges</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Extra Charges</label>
                         <input
                           type="number"
                           value={editExtraCharges}
@@ -2696,7 +2755,7 @@ export default function BookingPortal() {
                       </div>
 
                       <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">Commission</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Commission</label>
                         <input
                           type="number"
                           value={editCommission}
@@ -2707,7 +2766,7 @@ export default function BookingPortal() {
                       </div>
 
                       <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
-                        <label className="text-[10px] text-zinc-450 font-medium">Advance Paid</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Advance Paid</label>
                         <input
                           type="number"
                           value={editAdvance}
@@ -2734,7 +2793,7 @@ export default function BookingPortal() {
                       )}
 
                       <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
-                        <label className="text-[10px] text-zinc-450 font-medium">Balance Due Readout</label>
+                        <label className="text-[10px] text-zinc-455 font-medium">Balance Due Readout</label>
                         <input
                           type="number"
                           value={editBalanceVal}
@@ -2744,11 +2803,12 @@ export default function BookingPortal() {
                       </div>
 
                       <div className="flex flex-col gap-1 col-span-2">
-                        <label className="text-[10px] text-zinc-405 font-semibold uppercase">Balance Paid Account</label>
+                        <label className="text-[10px] text-sky-455 font-semibold uppercase">Balance Paid Account</label>
                         <select
                           value={editBalanceAccount}
                           onChange={(e) => setEditBalanceAccount(e.target.value)}
                           className="bg-zinc-900 border border-zinc-850 rounded p-1 text-xs text-white"
+                          required
                         >
                           <option value="">-- Select --</option>
                           {staffNamesList.map(name => (
@@ -2873,7 +2933,7 @@ const EditableStepper = ({
   return (
     <div className="flex flex-col gap-1 w-full">
       {label && <label className="text-[10px] text-zinc-400 font-semibold">{label}</label>}
-      <div className="flex items-center justify-between bg-zinc-950 border border-zinc-900 rounded-xl p-1 w-full">
+      <div className="flex items-center justify-between bg-zinc-955 border border-zinc-900 rounded-xl p-1 w-full">
         <button
           type="button"
           onClick={() => {

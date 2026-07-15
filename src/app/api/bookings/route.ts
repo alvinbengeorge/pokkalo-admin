@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-function validateBookingPayload(body: any) {
+function validateBookingPayload(body: any, isPut = false) {
   const {
-    entryUser,
     partner,
     partnerName,
     name,
@@ -18,16 +17,17 @@ function validateBookingPayload(body: any) {
     driverStaff,
     advance,
     advanceAccount,
+    balanceAccount,
   } = body;
 
-  // Enforce Register Number
-  if (!registerNumber || !registerNumber.trim()) {
-    return 'Register Number is required';
+  // Enforce Register Number on updates
+  if (isPut && (!registerNumber || !registerNumber.trim())) {
+    return 'Register Number is required for updates';
   }
 
   // Mandatory fields
-  if (!entryUser || !partner || !name || !mob || !guideStaff || !assistStaff || !location) {
-    return 'Missing required guest/staff details (User, Partner, Name, Mobile, Guide, Assist, Location)';
+  if (!partner || !name || !mob || !location || !balanceAccount || !balanceAccount.trim()) {
+    return 'Missing required guest/staff details (Partner, Name, Mobile, Location, Balance Paid Account)';
   }
 
   // Adults must be >= 1
@@ -45,9 +45,18 @@ function validateBookingPayload(body: any) {
     return 'At least one service type must be added';
   }
 
+  // Guide staff must be selected (as array of strings)
+  if (!guideStaff || !Array.isArray(guideStaff) || guideStaff.length === 0) {
+    return 'At least one Guide Staff is compulsory';
+  }
+
+  // Assist staff must be array if present
+  if (assistStaff && !Array.isArray(assistStaff)) {
+    return 'Assist Staff must be a list';
+  }
+
   // Check if Towing or Boating is selected
   const hasTowing = services.some((s: any) => s.serviceId.includes('towing'));
-  const hasBoating = services.some((s: any) => s.serviceId.includes('boating'));
 
   // Towing compulsory driver staff validation
   if (hasTowing && (!driverStaff || !driverStaff.trim())) {
@@ -88,8 +97,8 @@ export async function POST(request: Request) {
       balance,
       commission,
       total,
-      guideStaff,
-      assistStaff,
+      guideStaff, // Array of strings
+      assistStaff, // Array of strings
       customPickupPrice,
       customFoodPrice,
       customRefreshmentPrice,
@@ -97,7 +106,6 @@ export async function POST(request: Request) {
       serviceRemarks,
       staffRemarks,
       location,
-      registerNumber,
       driverStaff,
       advanceAccount,
       balanceAccount,
@@ -108,8 +116,32 @@ export async function POST(request: Request) {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB || 'kayak_club');
 
+    // Atomic auto-increment counter sequence
+    const counterDoc = await db.collection('counters').findOneAndUpdate(
+      { _id: 'booking_reg_seq' as any },
+      { $inc: { seq: 1 } },
+      { upsert: true, returnDocument: 'after' }
+    );
+    
+    // Fallback if upsert returns empty first time (it shouldn't but let's be safe)
+    let seqVal = 1001;
+    if (counterDoc && typeof counterDoc.seq === 'number') {
+      seqVal = counterDoc.seq;
+    } else {
+      // Find current count
+      const count = await db.collection('bookings').countDocuments();
+      seqVal = 1000 + count + 1;
+      await db.collection('counters').updateOne(
+        { _id: 'booking_reg_seq' as any },
+        { $set: { seq: seqVal } },
+        { upsert: true }
+      );
+    }
+
+    const autoRegNumber = `REG-${seqVal}`;
+
     const booking = {
-      registerNumber: registerNumber.trim(),
+      registerNumber: autoRegNumber,
       entryUser,
       partner,
       partnerName: (partner === 'Partner' || partner === 'Broker') ? (partnerName || '') : '',
@@ -126,8 +158,8 @@ export async function POST(request: Request) {
       balance: Number(balance) || 0,
       commission: finalCommission,
       total: Number(total) || 0,
-      guideStaff,
-      assistStaff,
+      guideStaff: guideStaff || [],
+      assistStaff: assistStaff || [],
       driverStaff: driverStaff || '',
       advanceAccount: advanceAccount || '',
       balanceAccount: balanceAccount || '',
@@ -146,6 +178,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       bookingId: result.insertedId,
+      registerNumber: autoRegNumber,
       message: 'Booking submitted successfully!',
     });
   } catch (error: any) {
@@ -166,7 +199,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Missing booking ID parameter' }, { status: 400 });
     }
 
-    const validationError = validateBookingPayload(body);
+    const validationError = validateBookingPayload(body, true);
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
@@ -187,8 +220,8 @@ export async function PUT(request: Request) {
       balance,
       commission,
       total,
-      guideStaff,
-      assistStaff,
+      guideStaff, // Array of strings
+      assistStaff, // Array of strings
       customPickupPrice,
       customFoodPrice,
       customRefreshmentPrice,
@@ -225,8 +258,8 @@ export async function PUT(request: Request) {
         balance: Number(balance) || 0,
         commission: finalCommission,
         total: Number(total) || 0,
-        guideStaff,
-        assistStaff,
+        guideStaff: guideStaff || [],
+        assistStaff: assistStaff || [],
         driverStaff: driverStaff || '',
         advanceAccount: advanceAccount || '',
         balanceAccount: balanceAccount || '',
@@ -268,16 +301,54 @@ export async function GET() {
     const client = await clientPromise;
     const db = client.db(process.env.MONGODB_DB || 'kayak_club');
     
-    // Check if any booking has old structure (services contains strings instead of objects)
-    // If so, delete all booking records to start fresh
-    const oldBookingExists = await db.collection('bookings').findOne({ 
-      'services.0': { $type: 'string' } 
-    });
-    
-    if (oldBookingExists) {
-      await db.collection('bookings').deleteMany({});
+    // Auto-migration & rewrite of existing bookings to have auto-incrementing REG numbers
+    const allBookings = await db.collection('bookings').find({}).sort({ createdAt: 1 }).toArray();
+    let nextIndex = 1001;
+    let migrationsRequired = false;
+
+    // Check if migration is required
+    for (let i = 0; i < allBookings.length; i++) {
+      const expectedReg = `REG-${1001 + i}`;
+      if (allBookings[i].registerNumber !== expectedReg) {
+        migrationsRequired = true;
+        break;
+      }
     }
 
+    if (migrationsRequired) {
+      for (const b of allBookings) {
+        const expectedReg = `REG-${nextIndex}`;
+        
+        // Normalize single guide/assistance strings to arrays if they are strings
+        const guides = Array.isArray(b.guideStaff) 
+          ? b.guideStaff 
+          : b.guideStaff ? [b.guideStaff] : [];
+        const assistants = Array.isArray(b.assistStaff) 
+          ? b.assistStaff 
+          : b.assistStaff ? [b.assistStaff] : [];
+
+        await db.collection('bookings').updateOne(
+          { _id: b._id },
+          { 
+            $set: { 
+              registerNumber: expectedReg,
+              guideStaff: guides,
+              assistStaff: assistants,
+            } 
+          }
+        );
+        nextIndex++;
+      }
+      
+      // Update counters collection
+      await db.collection('counters').updateOne(
+        { _id: 'booking_reg_seq' as any },
+        { $set: { seq: nextIndex - 1 } },
+        { upsert: true }
+      );
+    }
+
+    // Fetch refreshed bookings
     const bookings = await db
       .collection('bookings')
       .find({})
