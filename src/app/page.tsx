@@ -2211,153 +2211,154 @@ export default function BookingPortal() {
             {/* TAB VIEW 2: EXPENSES LOG TABLE & ENTRY FORM */}
             {activeTab === 'expenses' && (
               <div className="flex flex-col gap-5 animate-in fade-in duration-200">
-                
                 {/* Expense Entry Form */}
-                <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-                  <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
-                    <DollarSign size={18} className="text-sky-400" />
-                    <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Log New Expense</h2>
-                  </div>
-
-                  <form onSubmit={handleSubmitExpense} className="flex flex-col gap-4">
-                    
-                    {/* Expense Date */}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="exp-date" className="text-xs text-zinc-400 font-medium">Expense Date</label>
-                      <input
-                        id="exp-date"
-                        type="date"
-                        value={expenseDate}
-                        onChange={(e) => setExpenseDate(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505 w-full"
-                        required
-                      />
+                {user.role === 'staff' && (
+                  <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                      <DollarSign size={18} className="text-sky-400" />
+                      <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Log New Expense</h2>
                     </div>
 
-                    {/* Expense Category Type */}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="exp-category" className="text-xs text-zinc-400 font-medium">Type of Expense</label>
-                      <select
-                        id="exp-category"
-                        value={expenseType}
-                        onChange={(e) => setExpenseType(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
-                        required
-                      >
-                        <option value="Fuel">Fuel</option>
-                        <option value="Salaries / Wages">Salaries / Wages</option>
-                        <option value="Boat Maintenance & Repairs">Boat Maintenance & Repairs</option>
-                        <option value="Rent / Lease">Rent / Lease</option>
-                        <option value="Food & Staff Refreshments">Food & Staff Refreshments</option>
-                        <option value="Office & Dock Supplies">Office & Dock Supplies</option>
-                        <option value="Electricity & Utility Bills">Electricity & Utility Bills</option>
-                        <option value="Others / Miscellaneous">Others / Miscellaneous</option>
-                      </select>
-                    </div>
-
-                    {/* Paid Amount */}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="exp-amount" className="text-xs text-zinc-400 font-medium">Paid Amount (₹)</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-550 text-xs">₹</span>
+                    <form onSubmit={handleSubmitExpense} className="flex flex-col gap-4">
+                      
+                      {/* Expense Date */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="exp-date" className="text-xs text-zinc-400 font-medium">Expense Date</label>
                         <input
-                          id="exp-amount"
-                          type="number"
-                          placeholder="Amount in Rupees"
-                          value={expenseAmount}
-                          onChange={(e) => setExpenseAmount(e.target.value)}
-                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-8 pr-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                          id="exp-date"
+                          type="date"
+                          value={expenseDate}
+                          onChange={(e) => setExpenseDate(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505 w-full"
                           required
                         />
                       </div>
-                    </div>
 
-                    {/* Cash / Gpay Mode Selector */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs text-zinc-400 font-medium">Payment Mode</label>
-                      <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
-                        {(['Cash', 'Gpay'] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => setExpenseMode(mode)}
-                            className={`py-2 text-xs font-bold rounded-lg transition-all ${
-                              expenseMode === mode
-                                ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10'
-                                : 'text-zinc-400 hover:text-zinc-200'
-                            }`}
-                          >
-                            {mode}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* File Attachment Proof - Resizes client side automatically */}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="exp-file" className="text-xs text-zinc-400 font-medium">Bill / Gpay Screenshot Proof</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          id="exp-file"
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          onChange={handleImageFileChange}
-                          className="hidden"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="py-2.5 px-4 bg-zinc-900 border border-zinc-850 hover:bg-zinc-850 rounded-xl text-xs font-bold text-zinc-300 flex items-center gap-2 cursor-pointer transition-colors"
+                      {/* Expense Category Type */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="exp-category" className="text-xs text-zinc-400 font-medium">Type of Expense</label>
+                        <select
+                          id="exp-category"
+                          value={expenseType}
+                          onChange={(e) => setExpenseType(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                          required
                         >
-                          <ImageIcon size={14} className="text-sky-400" />
-                          <span>Choose Receipt Image</span>
-                        </button>
-                        
-                        {expenseScreenshot && (
-                          <div className="relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={expenseScreenshot}
-                              alt="Thumbnail preview"
-                              className="w-10 h-10 rounded-lg object-cover border border-zinc-800 cursor-pointer"
-                              onClick={() => setPreviewImageSrc(expenseScreenshot)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setExpenseScreenshot('')}
-                              className="absolute -top-1.5 -right-1.5 bg-rose-500 text-zinc-950 p-0.5 rounded-full cursor-pointer hover:bg-rose-400"
-                            >
-                              <X size={10} />
-                            </button>
-                          </div>
-                        )}
+                          <option value="Fuel">Fuel</option>
+                          <option value="Salaries / Wages">Salaries / Wages</option>
+                          <option value="Boat Maintenance & Repairs">Boat Maintenance & Repairs</option>
+                          <option value="Rent / Lease">Rent / Lease</option>
+                          <option value="Food & Staff Refreshments">Food & Staff Refreshments</option>
+                          <option value="Office & Dock Supplies">Office & Dock Supplies</option>
+                          <option value="Electricity & Utility Bills">Electricity & Utility Bills</option>
+                          <option value="Others / Miscellaneous">Others / Miscellaneous</option>
+                        </select>
                       </div>
-                      <span className="text-[8px] text-zinc-550 leading-relaxed font-mono block">Images are auto-resized client-side to keep DB storage footprint lightweight.</span>
-                    </div>
 
-                    {/* Remarks */}
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="exp-remarks" className="text-xs text-zinc-400 font-medium">Remarks</label>
-                      <input
-                        id="exp-remarks"
-                        type="text"
-                        placeholder="Add details regarding this expense..."
-                        value={expenseRemarks}
-                        onChange={(e) => setExpenseRemarks(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
-                      />
-                    </div>
+                      {/* Paid Amount */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="exp-amount" className="text-xs text-zinc-400 font-medium">Paid Amount (₹)</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-550 text-xs">₹</span>
+                          <input
+                            id="exp-amount"
+                            type="number"
+                            placeholder="Amount in Rupees"
+                            value={expenseAmount}
+                            onChange={(e) => setExpenseAmount(e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-8 pr-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                            required
+                          />
+                        </div>
+                      </div>
 
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-3.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer mt-2"
-                    >
-                      {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : <span>Log Expense</span>}
-                    </button>
-                  </form>
-                </div>
+                      {/* Cash / Gpay Mode Selector */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-zinc-400 font-medium">Payment Mode</label>
+                        <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
+                          {(['Cash', 'Gpay'] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setExpenseMode(mode)}
+                              className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                                expenseMode === mode
+                                  ? 'bg-sky-500 text-zinc-955 shadow-md shadow-sky-500/10'
+                                  : 'text-zinc-400 hover:text-zinc-200'
+                              }`}
+                            >
+                              {mode}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* File Attachment Proof - Resizes client side automatically */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="exp-file" className="text-xs text-zinc-400 font-medium">Bill / Gpay Screenshot Proof</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            id="exp-file"
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageFileChange}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="py-2.5 px-4 bg-zinc-900 border border-zinc-850 hover:bg-zinc-855 rounded-xl text-xs font-bold text-zinc-300 flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <ImageIcon size={14} className="text-sky-400" />
+                            <span>Choose Receipt Image</span>
+                          </button>
+                          
+                          {expenseScreenshot && (
+                            <div className="relative">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={expenseScreenshot}
+                                alt="Thumbnail preview"
+                                className="w-10 h-10 rounded-lg object-cover border border-zinc-800 cursor-pointer"
+                                onClick={() => setPreviewImageSrc(expenseScreenshot)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setExpenseScreenshot('')}
+                                className="absolute -top-1.5 -right-1.5 bg-rose-500 text-zinc-950 p-0.5 rounded-full cursor-pointer hover:bg-rose-400"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[8px] text-zinc-550 leading-relaxed font-mono block">Images are auto-resized client-side to keep DB storage footprint lightweight.</span>
+                      </div>
+
+                      {/* Remarks */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="exp-remarks" className="text-xs text-zinc-400 font-medium">Remarks</label>
+                        <input
+                          id="exp-remarks"
+                          type="text"
+                          placeholder="Add details regarding this expense..."
+                          value={expenseRemarks}
+                          onChange={(e) => setExpenseRemarks(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-3.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer mt-2"
+                      >
+                        {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : <span>Log Expense</span>}
+                      </button>
+                    </form>
+                  </div>
+                )}
 
                 {/* Expenses Log Table Roster (Six Columns + User Column) */}
                 <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3 max-w-full overflow-hidden">
