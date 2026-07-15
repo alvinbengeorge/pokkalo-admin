@@ -28,7 +28,9 @@ import {
   MessageSquare,
   Edit2,
   Save,
-  X
+  X,
+  FileText,
+  Image as ImageIcon
 } from 'lucide-react';
 
 const PARTNER_TYPES = ['Walk-In', 'Partner', 'Broker'] as const;
@@ -82,6 +84,18 @@ interface BookingRecord {
   createdAt: string;
 }
 
+interface ExpenseRecord {
+  _id: string;
+  date: string;
+  type: string;
+  amount: number;
+  paymentMode: 'Cash' | 'Gpay';
+  screenshot?: string; // Base64 compressed screenshot string
+  remarks?: string;
+  entryUser: string;
+  createdAt: string;
+}
+
 interface StaffUser {
   _id: string;
   username: string;
@@ -114,6 +128,9 @@ export default function BookingPortal() {
   const [authLoading, setAuthLoading] = useState(false);
   const [seedStatus, setSeedStatus] = useState<string | null>(null);
 
+  // Tab View Switcher ('guest' | 'expenses')
+  const [activeTab, setActiveTab] = useState<'guest' | 'expenses'>('guest');
+
   // Dynamic Prices State
   const [prices, setPrices] = useState<{
     services: ServicePricingConfig[];
@@ -141,7 +158,7 @@ export default function BookingPortal() {
   const [assistStaff, setAssistStaff] = useState<string[]>([]);
   const [driverStaff, setDriverStaff] = useState('');
 
-  // Form Fields State (Staff view)
+  // Form Fields State (Staff view - New Guest tab)
   const [partner, setPartner] = useState<PartnerType>('Walk-In');
   const [partnerName, setPartnerName] = useState('');
   const [name, setName] = useState('');
@@ -178,6 +195,20 @@ export default function BookingPortal() {
   const [guestRemarks, setGuestRemarks] = useState('');
   const [serviceRemarks, setServiceRemarks] = useState('');
   const [staffRemarks, setStaffRemarks] = useState('');
+
+  // EXPENSE ENTRY FORM STATES
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [expenseType, setExpenseType] = useState('Fuel');
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseMode, setExpenseMode] = useState<'Cash' | 'Gpay'>('Cash');
+  const [expenseScreenshot, setExpenseScreenshot] = useState('');
+  const [expenseRemarks, setExpenseRemarks] = useState('');
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [isLoadingExpenses, setIsLoadingExpenses] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Preview modals
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
 
   // Admin Dashboard State
   const [staffList, setStaffList] = useState<StaffUser[]>([]);
@@ -279,6 +310,21 @@ export default function BookingPortal() {
     }
   }, []);
 
+  const fetchExpenses = useCallback(async () => {
+    setIsLoadingExpenses(true);
+    try {
+      const res = await fetch('/api/expenses');
+      if (res.ok) {
+        const data = await res.json();
+        setExpenses(data);
+      }
+    } catch (err) {
+      console.error('Failed to load expenses:', err);
+    } finally {
+      setIsLoadingExpenses(false);
+    }
+  }, []);
+
   const fetchStaffList = useCallback(async () => {
     setAdminLoading(true);
     try {
@@ -312,10 +358,11 @@ export default function BookingPortal() {
   useEffect(() => {
     if (user) {
       fetchBookings();
+      fetchExpenses();
       fetchStaffList();
       fetchLocations();
     }
-  }, [user, fetchBookings, fetchStaffList, fetchLocations]);
+  }, [user, fetchBookings, fetchExpenses, fetchStaffList, fetchLocations]);
 
   // Force commission to 0 and disable it when Walk-In is selected
   useEffect(() => {
@@ -707,6 +754,7 @@ export default function BookingPortal() {
   const totalCommission = bookings.reduce((sum, b) => sum + (b.commission || 0), 0);
   const totalAdvance = bookings.reduce((sum, b) => sum + (b.advance || 0), 0);
   const totalBalance = bookings.reduce((sum, b) => sum + (b.balance || 0), 0);
+  const totalExpenseSum = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
   // Show Toast Helper
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -1146,6 +1194,138 @@ export default function BookingPortal() {
     }
   };
 
+  // CLIENT SIDE FILE COMPRESSION TO BASE64 JPEG
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Output compressed base64 jpeg at 70% quality (~35-60KB size)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setExpenseScreenshot(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Submit Expense Logger Form
+  const handleSubmitExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!expenseAmount || parseFloat(expenseAmount) <= 0) {
+      showToast('error', 'Paid Amount must be a positive number');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const payload = {
+      date: expenseDate,
+      type: expenseType,
+      amount: parseFloat(expenseAmount),
+      paymentMode: expenseMode,
+      screenshot: expenseScreenshot,
+      remarks: expenseRemarks,
+      entryUser: user?.username || 'System',
+    };
+
+    try {
+      const res = await fetch('/api/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (res.ok) {
+        showToast('success', 'Expense logged successfully!');
+        setExpenseAmount('');
+        setExpenseRemarks('');
+        setExpenseScreenshot('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        fetchExpenses();
+      } else {
+        showToast('error', result.error || 'Failed to submit expense');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Connection error logging expense.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Admin delete expense
+  const handleDeleteExpense = async (id: string) => {
+    if (!confirm('Are you sure you want to permanently delete this expense record?')) return;
+
+    try {
+      const res = await fetch(`/api/expenses?id=${id}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast('success', 'Expense record removed.');
+        fetchExpenses();
+      } else {
+        showToast('error', data.error || 'Failed to delete expense record');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Network error deleting expense');
+    }
+  };
+
+  // Excel Expenses Exporter (Restricted to Admin Console)
+  const handleExportExpensesToExcel = () => {
+    if (expenses.length === 0) {
+      showToast('error', 'No expenses available to export');
+      return;
+    }
+
+    const dataToExport = expenses.map((e) => ({
+      'Date': e.date,
+      'Type of Expense': e.type,
+      'Paid Amount (INR)': e.amount,
+      'Cash / Gpay': e.paymentMode,
+      'Remarks': e.remarks || '',
+      'Logged By': e.entryUser,
+      'Created Timestamp': new Date(e.createdAt).toLocaleString(),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Expenses Report");
+
+    XLSX.writeFile(workbook, `Pokkalo_Kayaking_Club_Expenses_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast('success', 'Expenses Excel report downloaded successfully!');
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <main className="w-full max-w-md mx-auto px-4 py-6 flex-1 flex flex-col gap-6 relative">
@@ -1154,15 +1334,32 @@ export default function BookingPortal() {
         {toast && (
           <div className={`fixed top-4 left-4 right-4 z-50 p-4 rounded-xl flex items-center gap-3 shadow-2xl transition-all duration-300 transform translate-y-0 ${
             toast.type === 'success' 
-              ? 'bg-emerald-950/95 border border-emerald-500/30 text-emerald-200' 
+              ? 'bg-emerald-955/95 border border-emerald-500/30 text-emerald-200' 
               : 'bg-rose-955/95 border border-rose-500/30 text-rose-200'
           }`}>
             {toast.type === 'success' ? (
-              <div className="bg-emerald-500 text-emerald-950 p-1 rounded-full"><Check size={16} /></div>
+              <div className="bg-emerald-500 text-emerald-900 p-1 rounded-full"><Check size={16} /></div>
             ) : (
-              <div className="bg-rose-500 text-rose-950 p-1 rounded-full"><AlertCircle size={16} /></div>
+              <div className="bg-rose-500 text-rose-900 p-1 rounded-full"><AlertCircle size={16} /></div>
             )}
             <span className="text-xs font-semibold">{toast.message}</span>
+          </div>
+        )}
+
+        {/* Image Preview Modal */}
+        {previewImageSrc && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4" onClick={() => setPreviewImageSrc(null)}>
+            <div className="relative max-w-sm max-h-[80vh] flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+              <button 
+                onClick={() => setPreviewImageSrc(null)}
+                className="absolute -top-10 right-0 text-white font-bold bg-zinc-900 border border-zinc-800 p-2 rounded-full cursor-pointer hover:bg-zinc-800"
+              >
+                <X size={18} />
+              </button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={previewImageSrc} alt="Proof screenshot" className="rounded-2xl border border-zinc-800 object-contain max-h-[70vh] shadow-2xl" />
+              <div className="text-center text-xs text-zinc-400 font-medium">Click outside or X button to close preview</div>
+            </div>
           </div>
         )}
 
@@ -1199,7 +1396,7 @@ export default function BookingPortal() {
                   placeholder="••••••••"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500 transition-colors"
+                  className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-3 px-4 text-sm text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500 transition-colors"
                   required
                 />
               </div>
@@ -1233,16 +1430,16 @@ export default function BookingPortal() {
               )}
             </div>
           </div>
-        ) : user.role === 'staff' ? (
+        ) : (
           
-          /* 2. RENDER STAFF BOOKING ENTRY FORM */
+          /* SIGNED IN USER - SHOW PORTAL LAYOUT WITH NAVIGATION TABS */
           <div className="flex flex-col gap-5">
             {/* Header */}
             <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
               <div className="flex flex-col">
                 <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Pokkalo Kayaking Club</span>
                 <h1 className="text-base font-bold text-white flex items-center gap-1.5">
-                  Staff: <span className="text-zinc-200">{user.username}</span>
+                  {user.role === 'admin' ? 'Admin' : 'Staff'}: <span className="text-zinc-200">{user.username}</span>
                 </h1>
               </div>
               <button 
@@ -1254,1630 +1451,1015 @@ export default function BookingPortal() {
               </button>
             </div>
 
-            {/* Booking Entry Form */}
-            <form onSubmit={handleSubmitBooking} className="flex flex-col gap-5">
-              
-              {/* Section 1: Guest Details */}
-              <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
-                  <Users size={18} className="text-sky-400" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">1. Guest Details</h2>
-                </div>
-
-                {/* Partner Select */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-zinc-400 font-medium">Partner Type</label>
-                  <div className="grid grid-cols-3 gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
-                    {PARTNER_TYPES.map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => setPartner(type)}
-                        className={`py-2 px-1 text-[10px] font-semibold rounded-lg transition-all ${
-                          partner === type 
-                            ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10' 
-                            : 'text-zinc-400 hover:text-zinc-200'
-                        }`}
-                      >
-                        {type}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Conditional input: Broker Name or Partner Name */}
-                  {(partner === 'Partner' || partner === 'Broker') && (
-                    <div className="flex flex-col gap-1.5 mt-3 animate-in slide-in-from-top-1 duration-155">
-                      <label htmlFor="staff-partner-name" className="text-xs text-zinc-455 font-semibold text-sky-405">
-                        {partner === 'Partner' ? 'Partner Name' : 'Broker Name'}
-                      </label>
-                      <input
-                        id="staff-partner-name"
-                        type="text"
-                        placeholder={`Enter name of ${partner.toLowerCase()}`}
-                        value={partnerName}
-                        onChange={(e) => setPartnerName(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                        required
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Guest Name Input */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="staff-name" className="text-xs text-zinc-400 font-medium">Guest Name</label>
-                  <div className="relative">
-                    <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                    <input
-                      id="staff-name"
-                      type="text"
-                      placeholder=""
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Mobile / Steppers Row */}
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-mob" className="text-xs text-zinc-400 font-medium">Guest Mob</label>
-                    <div className="relative">
-                      <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                      <input
-                        id="staff-mob"
-                        type="tel"
-                        placeholder=""
-                        value={mob}
-                        onChange={(e) => setMob(e.target.value.replace(/[^0-9+]/g, ''))}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Main Guest Counter Steppers */}
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <EditableStepper
-                      label="Guest Adults (Compulsory)"
-                      value={guestAdults}
-                      onChange={(val) => setGuestAdults(val)}
-                      min={1}
-                    />
-                    <EditableStepper
-                      label="Guest Children"
-                      value={guestChildren}
-                      onChange={(val) => setGuestChildren(val)}
-                      min={0}
-                    />
-                  </div>
-                </div>
-
-                {/* Section Remarks: Guest Details */}
-                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-guest-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
-                    <MessageSquare size={10} />
-                    <span>Remarks (Guest Details)</span>
-                  </label>
-                  <input
-                    id="staff-guest-remarks"
-                    type="text"
-                    placeholder="Remarks regarding guest profiles..."
-                    value={guestRemarks}
-                    onChange={(e) => setGuestRemarks(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
-                  />
-                </div>
-              </div>
-
-              {/* Section 2: Services */}
-              <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
-                  <Layers size={18} className="text-sky-400" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">2. Services Selection</h2>
-                </div>
-
-                {/* Location / Branch Dropdown Selector */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="staff-location-select" className="text-xs text-zinc-400 font-medium flex items-center gap-1">
-                    <MapPin size={12} className="text-sky-400" />
-                    <span>Select Branch Location</span>
-                  </label>
-                  <select
-                    id="staff-location-select"
-                    value={selectedLocation}
-                    onChange={(e) => setSelectedLocation(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
-                    required
-                  >
-                    {locationsList.length === 0 ? (
-                      <option value="">No locations available - Contact Admin</option>
-                    ) : (
-                      locationsList.map((loc) => (
-                        <option key={loc._id} value={loc.name}>
-                          {loc.name}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                {/* Service Rows Dynamic List */}
-                <div className="flex flex-col gap-4 pt-2 border-t border-zinc-850">
-                  <label className="text-xs text-zinc-400 font-medium">Add Services</label>
-                  
-                  {serviceRows.map((row, index) => {
-                    const match = prices.services.find(s => s.id === row.serviceId);
-                    const basePrice = match ? match.price : 0;
-                    const calculatedRowRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
-
-                    return (
-                      <div 
-                        key={index} 
-                        className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3 relative animate-in slide-in-from-top-1 duration-150"
-                      >
-                        {/* Selector / Delete Row */}
-                        <div className="flex justify-between items-center gap-2">
-                          <select
-                            value={row.serviceId}
-                            onChange={(e) => handleServiceRowChange(index, 'serviceId', e.target.value)}
-                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
-                          >
-                            {prices.services.map((service) => (
-                              <option key={service.id} value={service.id}>
-                                {service.name} (₹{service.price})
-                              </option>
-                            ))}
-                          </select>
-                          {serviceRows.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveServiceRow(index)}
-                              className="p-2 bg-zinc-900 hover:bg-rose-955/35 text-rose-500 rounded-lg border border-zinc-850 hover:border-rose-900/60 transition-colors active:scale-95"
-                              title="Remove service row"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Steppers for Row */}
-                        <div className="grid grid-cols-2 gap-3">
-                          <EditableStepper
-                            label="Adults"
-                            value={row.adults}
-                            onChange={(val) => handleServiceRowChange(index, 'adults', val)}
-                            min={0}
-                          />
-                          <EditableStepper
-                            label="Children (50% Cost)"
-                            value={row.children}
-                            onChange={(val) => handleServiceRowChange(index, 'children', val)}
-                            min={0}
-                          />
-                        </div>
-
-                        {/* Row Subtotal readout */}
-                        <div className="text-right text-[10px] text-zinc-550">
-                          Row Cost: <span className="font-bold text-sky-400">₹{calculatedRowRate}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <button
-                    type="button"
-                    onClick={handleAddServiceRow}
-                    className="w-full py-2 bg-zinc-900 hover:bg-zinc-850 text-sky-400 hover:text-sky-300 text-xs font-bold rounded-xl border border-zinc-855 border-dashed hover:border-sky-500/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
-                  >
-                    <Plus size={13} />
-                    <span>Add Service Row</span>
-                  </button>
-                </div>
-
-                {/* Addons Grid */}
-                <div className="flex flex-col gap-2 pt-2 border-t border-zinc-850">
-                  <label className="text-xs text-zinc-400 font-medium">Extra Add-ons</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {ADDONS.map((addon) => {
-                      const isSelected = selectedAddons.includes(addon.id);
-                      const IconComponent = addon.icon;
-                      
-                      return (
-                        <button
-                          key={addon.id}
-                          type="button"
-                          onClick={() => toggleAddon(addon.id)}
-                          className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all text-center ${
-                            isSelected
-                              ? 'bg-sky-500/10 border-sky-500 text-sky-300'
-                              : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:border-zinc-750'
-                          }`}
-                        >
-                          <IconComponent size={15} />
-                          <span className="text-[9px] font-bold leading-tight">{addon.name}</span>
-                          <span className="text-[8px] opacity-60">+Custom</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* CUSTOM ADDON PRICING INPUTS */}
-                  {selectedAddons.includes('pickup-drop') && (
-                    <div className="flex flex-col gap-1.5 mt-2 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-pickup-price" className="text-[10px] text-zinc-400 font-medium">Pickup/Drop Total Price (₹)</label>
-                      <input
-                        id="staff-pickup-price"
-                        type="number"
-                        placeholder="Enter custom pickup & drop cost"
-                        value={customPickupPrice}
-                        onChange={(e) => setCustomPickupPrice(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                        required
-                      />
-                    </div>
-                  )}
-                  {selectedAddons.includes('food') && (
-                    <div className="flex flex-col gap-1.5 mt-2 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-food-price" className="text-[10px] text-zinc-400 font-medium">Food Total Price (₹)</label>
-                      <input
-                        id="staff-food-price"
-                        type="number"
-                        placeholder="Enter custom food cost"
-                        value={customFoodPrice}
-                        onChange={(e) => setCustomFoodPrice(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                        required
-                      />
-                    </div>
-                  )}
-                  {selectedAddons.includes('refreshment') && (
-                    <div className="flex flex-col gap-1.5 mt-2 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-refreshment-price" className="text-[10px] text-zinc-400 font-medium">Refreshment Total Price (₹)</label>
-                      <input
-                        id="staff-refreshment-price"
-                        type="number"
-                        placeholder="Enter custom refreshments cost"
-                        value={customRefreshmentPrice}
-                        onChange={(e) => setCustomRefreshmentPrice(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
-                        required
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Section Remarks: Services */}
-                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-service-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
-                    <MessageSquare size={10} />
-                    <span>Remarks (Services & Add-ons)</span>
-                  </label>
-                  <input
-                    id="staff-service-remarks"
-                    type="text"
-                    placeholder="Remarks regarding selected packages..."
-                    value={serviceRemarks}
-                    onChange={(e) => setServiceRemarks(e.target.value)}
-                    className="w-full bg-zinc-955 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
-                  />
-                </div>
-              </div>
-
-              {/* Section 2.5: Staff Assignment for Guide, Assist, and Driver */}
-              <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
-                  <Briefcase size={18} className="text-sky-400" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Staff Assigned</h2>
-                </div>
-                
-                <div className="flex flex-col gap-3">
-                  
-                  {/* Multi-Select Guide tag checklist */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
-                      <span>Guide Staff (Select Multiple)</span>
-                      <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(Compulsory)</span>
-                    </label>
-                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-950 p-2 rounded-xl border border-zinc-900">
-                      {staffNamesList.map(name => {
-                        const isSelected = guideStaff.includes(name);
-                        return (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => handleToggleGuide(name)}
-                            className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
-                              isSelected 
-                                ? 'bg-sky-500 text-zinc-950 border-sky-500 shadow-md shadow-sky-500/10' 
-                                : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-zinc-200'
-                            }`}
-                          >
-                            {name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Multi-Select Assist tag checklist */}
-                  <div className="flex flex-col gap-1 mt-1">
-                    <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
-                      <span>Assist Staff (Select Multiple)</span>
-                      <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional)</span>
-                    </label>
-                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-950 p-2 rounded-xl border border-zinc-900">
-                      {staffNamesList.map(name => {
-                        const isSelected = assistStaff.includes(name);
-                        return (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => handleToggleAssist(name)}
-                            className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
-                              isSelected 
-                                ? 'bg-sky-500 text-zinc-950 border-sky-500 shadow-md shadow-sky-500/10' 
-                                : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-zinc-200'
-                            }`}
-                          >
-                            {name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Optional/Compulsory Driver selector for Towing & Boating */}
-                  {showDriverOption && (
-                    <div className="flex flex-col gap-1.5 mt-1 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-driver-input" className="text-xs text-zinc-400 font-semibold flex items-center gap-1">
-                        <span>Boat Driver Staff</span>
-                        {isDriverCompulsory ? (
-                          <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(Compulsory for Towing)</span>
-                        ) : (
-                          <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional for Boating)</span>
-                        )}
-                      </label>
-                      <select
-                        id="staff-driver-input"
-                        value={driverStaff}
-                        onChange={(e) => setDriverStaff(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
-                        required={isDriverCompulsory}
-                      >
-                        <option value="">-- Select Driver --</option>
-                        {staffNamesList.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                {/* Section Remarks: Staff Assigned */}
-                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
-                  <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
-                    <MessageSquare size={10} />
-                    <span>Remarks (Staff Assigned)</span>
-                  </label>
-                  <input
-                    id="staff-assigned-remarks"
-                    type="text"
-                    placeholder="Remarks regarding docking crews..."
-                    value={staffRemarks}
-                    onChange={(e) => setStaffRemarks(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
-                  />
-                </div>
-              </div>
-
-              {/* Section 3: Payment Details */}
-              <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
-                  <DollarSign size={18} className="text-sky-400" />
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">3. Payment Details</h2>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5 col-span-2">
-                    <label htmlFor="staff-rate" className="text-xs text-zinc-400 font-medium">Rate (Base)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">₹</span>
-                      <input
-                        id="staff-rate"
-                        type="number"
-                        placeholder="0"
-                        value={rate}
-                        readOnly
-                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 pl-7 pr-3 text-xs text-zinc-350 font-semibold cursor-not-allowed"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Advance Input & Account Dropdown */}
-                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
-                    <label htmlFor="staff-advance" className="text-xs text-zinc-400 font-medium">Advance Paid</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
-                      <input
-                        id="staff-advance"
-                        type="number"
-                        placeholder="0"
-                        value={advance}
-                        onChange={(e) => setAdvance(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Advance Account selector - compulsory if advance > 0 */}
-                  {advanceVal > 0 && (
-                    <div className="flex flex-col gap-1.5 col-span-2 animate-in slide-in-from-top-1 duration-150">
-                      <label htmlFor="staff-advance-account" className="text-[10px] text-sky-400 font-semibold uppercase">
-                        <span>Advance Paid Account (Compulsory)</span>
-                      </label>
-                      <select
-                        id="staff-advance-account"
-                        value={advanceAccount}
-                        onChange={(e) => setAdvanceAccount(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
-                        required
-                      >
-                        <option value="">-- Select Staff Account --</option>
-                        {staffNamesList.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Extra Charges Input */}
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-extra-charges" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
-                      <span>Extra Charges</span>
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">(Isolated)</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
-                      <input
-                        id="staff-extra-charges"
-                        type="number"
-                        placeholder="0"
-                        value={extraCharges}
-                        onChange={(e) => setExtraCharges(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Discount Input */}
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="staff-discount" className="text-xs text-zinc-400 font-medium">Discount</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
-                      <input
-                        id="staff-discount"
-                        type="number"
-                        placeholder="0"
-                        value={discount}
-                        onChange={(e) => setDiscount(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-555 transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Commission */}
-                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
-                    <label htmlFor="staff-commission" className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
-                      <span>Commission</span>
-                      {partner === 'Walk-In' && (
-                        <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(No Walk-In Commission)</span>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
-                      <input
-                        id="staff-commission"
-                        type="number"
-                        placeholder="0"
-                        value={commission}
-                        onChange={(e) => setCommission(e.target.value)}
-                        disabled={partner === 'Walk-In'}
-                        className={`w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors ${
-                          partner === 'Walk-In' ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-rose-500/20' : ''
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Balance Due Readout & Account */}
-                  <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
-                    <label className="text-xs text-zinc-400 font-medium">Balance Due</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-555 text-xs">₹</span>
-                      <input
-                        type="text"
-                        readOnly
-                        value={balanceVal}
-                        className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2.5 pl-7 pr-3 text-xs text-amber-400 font-bold cursor-not-allowed"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Balance Account selector - Compulsory */}
-                  <div className="flex flex-col gap-1.5 col-span-2 animate-in slide-in-from-top-1 duration-150">
-                    <label htmlFor="staff-balance-account" className="text-[10px] text-sky-400 font-semibold uppercase">
-                      <span>Balance Paid Account (Compulsory)</span>
-                    </label>
-                    <select
-                      id="staff-balance-account"
-                      value={balanceAccount}
-                      onChange={(e) => setBalanceAccount(e.target.value)}
-                      className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
-                      required
-                    >
-                      <option value="">-- Select Staff Account --</option>
-                      {staffNamesList.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Total Banner */}
-                <div className="bg-sky-500/10 border border-sky-500/25 rounded-xl p-3 flex justify-between items-center">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase">Total Bill</span>
-                    <span className="text-[8px] text-zinc-500">Rate + Addons - Discount</span>
-                  </div>
-                  <div className="text-lg font-black text-white">
-                    ₹{totalVal}
-                  </div>
-                </div>
-              </div>
-
-              {/* Submit */}
+            {/* Tab switch Navigation Bar */}
+            <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1.5 rounded-2xl border border-zinc-900 shadow-inner">
               <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-955 font-bold py-3.5 rounded-2xl shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                type="button"
+                onClick={() => setActiveTab('guest')}
+                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeTab === 'guest'
+                    ? 'bg-sky-500 text-zinc-955 shadow-lg shadow-sky-500/10'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
               >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" />
-                    <span>Saving entry...</span>
-                  </>
-                ) : (
-                  <span>Submit Booking</span>
-                )}
+                <Users size={14} />
+                <span>New Guest</span>
               </button>
-
-            </form>
-
-            {/* Local logs */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
-              <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
-                <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">My Recent Logs</span>
-                <button 
-                  type="button" 
-                  onClick={fetchBookings} 
-                  className="text-[9px] text-sky-400 hover:text-sky-305 font-semibold"
-                >
-                  Refresh
-                </button>
-              </div>
-              {isLoadingBookings ? (
-                <div className="py-4 text-center text-zinc-500 text-[10px] flex items-center justify-center gap-1">
-                  <Loader2 size={12} className="animate-spin" />
-                  <span>Loading log history...</span>
-                </div>
-              ) : bookings.filter(b => b.entryUser === user.username).length === 0 ? (
-                <div className="py-4 text-center text-zinc-500 text-[10px]">
-                  No bookings saved by you today.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
-                  {bookings
-                    .filter(b => b.entryUser === user.username)
-                    .map((booking) => (
-                      <div 
-                        key={booking._id} 
-                        onClick={() => handleOpenDetailedModal(booking)}
-                        className="bg-zinc-955 border border-zinc-900 rounded-lg p-2 flex flex-col gap-0.5 cursor-pointer hover:border-sky-500/30 transition-colors"
-                      >
-                        <div className="flex justify-between text-[10px] font-bold text-zinc-300">
-                          <span>{booking.name} ({booking.registerNumber || 'N/A'})</span>
-                          <span className="text-sky-400">₹{booking.total}</span>
-                        </div>
-                        <div className="text-[8px] text-zinc-550 truncate">
-                          Services: {booking.services.map(s => s.serviceName).join(', ')}
-                        </div>
-                        <div className="flex justify-between text-[7px] text-zinc-650 mt-1">
-                          <span>Staff: Guide: {Array.isArray(booking.guideStaff) ? booking.guideStaff.join(', ') : booking.guideStaff}</span>
-                          <span>{booking.partner}</span>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-        ) : (
-
-          /* 3. RENDER CENTRAL ADMIN DASHBOARD */
-          <div className="flex flex-col gap-5">
-            {/* Header */}
-            <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
-              <div className="flex flex-col">
-                <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider font-mono">Pokkalo Controller</span>
-                <h1 className="text-base font-black text-white">Admin Console</h1>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-850 hover:bg-zinc-855 text-[10px] font-semibold text-zinc-400 py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+              <button
+                type="button"
+                onClick={() => setActiveTab('expenses')}
+                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeTab === 'expenses'
+                    ? 'bg-sky-500 text-zinc-955 shadow-lg shadow-sky-500/10'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
               >
-                <LogOut size={12} />
-                <span>Log Out</span>
+                <DollarSign size={14} />
+                <span>Expenses</span>
               </button>
             </div>
 
-            {/* Quick Analytics Cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="glass-panel p-3.5 rounded-xl flex flex-col gap-1">
-                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Gross Sales</span>
-                <span className="text-lg font-black text-emerald-400">₹{totalRevenue}</span>
-                <span className="text-[7px] text-zinc-400">{bookings.length} Bookings total</span>
-              </div>
-
-              <div className="glass-panel p-3.5 rounded-xl flex flex-col gap-1">
-                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Commissions</span>
-                <span className="text-lg font-black text-amber-400">₹{totalCommission}</span>
-                <span className="text-[7px] text-zinc-400">Due to agent/brokers</span>
-              </div>
-
-              <div className="glass-panel p-3.5 rounded-xl flex flex-col gap-1">
-                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Advances Received</span>
-                <span className="text-lg font-black text-sky-400">₹{totalAdvance}</span>
-                <span className="text-[7px] text-zinc-400">Balance due: ₹{totalBalance}</span>
-              </div>
-
-              <div className="glass-panel p-3.5 rounded-xl flex flex-col gap-1">
-                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider">Staff Members</span>
-                <span className="text-lg font-black text-purple-400">{staffList.length}</span>
-                <span className="text-[7px] text-zinc-400">Active dock staff</span>
-              </div>
-            </div>
-
-            {/* Manage Location Branches */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
-                <MapPin size={16} className="text-sky-400" />
-                <span>Manage Locations (Branches)</span>
-              </h3>
-
-              {/* Add Location Form */}
-              <form onSubmit={handleCreateLocation} className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
-                <input
-                  type="text"
-                  placeholder="Location / Branch Name (e.g. Varkala)"
-                  value={newLocationName}
-                  onChange={(e) => setNewLocationName(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
-                  required
-                />
-                <button
-                  type="submit"
-                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-955 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Plus size={12} />
-                  <span>Add Location Branch</span>
-                </button>
-              </form>
-
-              {/* List Locations */}
-              {locationsList.length === 0 ? (
-                <div className="text-center py-2 text-[10px] text-zinc-655">No locations configured. Add branch above.</div>
-              ) : (
-                <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
-                  {locationsList.map((loc) => (
-                    <div key={loc._id} className="bg-zinc-900/60 rounded-lg py-1.5 px-2.5 flex justify-between items-center text-xs border border-zinc-855/60">
-                      <span className="font-semibold text-zinc-200">{loc.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLocation(loc._id, loc.name)}
-                        className="text-rose-500 hover:text-rose-450 p-1 rounded-md"
-                        title="Delete branch location"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Dynamic Price Customization Section with custom additions/deletions */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
-                <DollarSign size={16} className="text-amber-500" />
-                <span>Customize Prices</span>
-              </h3>
-              
-              <form onSubmit={handleSavePrices} className="flex flex-col gap-3">
-                <div className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Services Base Rates (₹)</div>
-                
-                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
-                  {Array.isArray(priceFormServices) && priceFormServices.map((srv, idx) => (
-                    <div key={idx} className="bg-zinc-950 p-2.5 rounded-xl border border-zinc-900 flex flex-col gap-2 relative">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Service Name"
-                          value={srv.name}
-                          onChange={(e) => handleAdminServiceChange(idx, 'name', e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 w-full"
-                          required
-                        />
-                        <input
-                          type="number"
-                          placeholder="Price"
-                          value={srv.price}
-                          onChange={(e) => handleAdminServiceChange(idx, 'price', parseInt(e.target.value) || 0)}
-                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2 text-xs text-white placeholder-zinc-655 w-20 text-center"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleAdminDeleteService(idx)}
-                          className="p-1.5 bg-zinc-900 hover:bg-rose-955/35 text-rose-500 rounded-lg border border-zinc-850"
-                          title="Remove custom service"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleAdminAddService}
-                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-850 text-sky-400 hover:text-sky-305 text-xs font-bold rounded-xl border border-zinc-855 border-dashed transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Plus size={13} />
-                  <span>Add Custom Service</span>
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={adminLoading}
-                  className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-800 disabled:text-zinc-550 text-zinc-955 font-bold py-2.5 rounded-xl text-xs mt-2 transition-colors cursor-pointer"
-                >
-                  {adminLoading ? 'Saving...' : 'Save Customizable Prices'}
-                </button>
-              </form>
-            </div>
-
-            {/* Staff Accounts Management */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1">
-                <Briefcase size={14} className="text-sky-400" />
-                <span>Manage Staff Accounts</span>
-              </h3>
-
-              {/* Create Staff Form */}
-              <form onSubmit={handleCreateStaff} className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="Username"
-                    value={newStaffUser}
-                    onChange={(e) => setNewStaffUser(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-650 focus:outline-none focus:border-sky-500"
-                    required
-                  />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={newStaffPassword}
-                    onChange={(e) => setNewStaffPassword(e.target.value)}
-                    className="bg-zinc-900 border border-zinc-855 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-zinc-655 focus:outline-none focus:border-sky-500"
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-sky-500 hover:bg-sky-400 text-zinc-955 font-bold py-1.5 rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Plus size={12} />
-                  <span>Create Staff Account</span>
-                </button>
-              </form>
-
-              {/* Staff list */}
-              {adminLoading ? (
-                <div className="py-2 text-center text-zinc-600 text-[10px] flex items-center justify-center gap-1">
-                  <Loader2 size={12} className="animate-spin" />
-                  <span>Loading staff database...</span>
-                </div>
-              ) : staffList.length === 0 ? (
-                <div className="text-center py-2 text-[10px] text-zinc-655">No staff members configured. Use form above to add.</div>
-              ) : (
-                <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
-                  {staffList.map((member) => (
-                    <div key={member._id} className="bg-zinc-900/60 rounded-lg py-1.5 px-2.5 flex justify-between items-center text-xs border border-zinc-850/60">
-                      <div className="flex items-center gap-2">
-                        <User size={12} className="text-zinc-400" />
-                        <span className="font-semibold text-zinc-200">{member.username}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteStaff(member.username)}
-                        className="text-rose-500 hover:text-rose-455 p-1 rounded-md transition-colors"
-                        title="Delete account"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Bookings log table */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
-              <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
-                <span className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1">
-                  <TrendingUp size={14} className="text-emerald-400" />
-                  <span>Club Booking Registry</span>
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleExportToExcel}
-                    className="text-[9px] text-amber-500 hover:text-amber-400 font-semibold flex items-center gap-1 bg-zinc-900 px-2 py-1 rounded border border-zinc-800"
-                  >
-                    <Download size={10} />
-                    <span>Export Logs</span>
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={fetchBookings} 
-                    className="text-[9px] text-sky-400 hover:text-sky-305 font-semibold"
-                  >
-                    Sync
-                  </button>
-                </div>
-              </div>
-
-              {isLoadingBookings ? (
-                <div className="py-6 text-center text-zinc-550 text-xs flex items-center justify-center gap-1.5">
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Syncing cloud databases...</span>
-                </div>
-              ) : bookings.length === 0 ? (
-                <div className="py-6 text-center text-zinc-555 text-xs">No entries submitted.</div>
-              ) : (
-                <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
-                  {bookings.map((booking) => (
-                    <div 
-                      key={booking._id}
-                      className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] relative hover:border-zinc-805 transition-colors"
-                    >
-                      {/* Clickable Card Body */}
-                      <div 
-                        onClick={() => handleOpenDetailedModal(booking)}
-                        className="cursor-pointer flex flex-col gap-1 pr-6"
-                      >
-                        <div className="flex justify-between items-start">
-                          <span className="font-bold text-zinc-200">{booking.name} ({booking.registerNumber || 'N/A'})</span>
-                          <span className="font-black text-emerald-400">₹{booking.total}</span>
-                        </div>
-                        <div className="text-[9px] text-zinc-400 leading-tight">
-                          <strong>Services:</strong> {booking.services.map(s => `${s.serviceName} (x${s.adults}A, ${s.children}C)`).join(', ')}
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-550 border-t border-zinc-900/60 pt-1 mt-1 font-semibold">
-                          <span>Guides: {Array.isArray(booking.guideStaff) ? booking.guideStaff.join(', ') : booking.guideStaff}</span>
-                          <span className="text-right text-sky-400">Total: ₹{booking.total}</span>
-                        </div>
-                      </div>
-
-                      {/* Absolute delete button for Admin */}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBooking(booking._id, booking.name)}
-                        className="absolute right-2 top-2 p-1.5 bg-zinc-900 hover:bg-rose-955 text-rose-500 hover:text-white rounded-md border border-zinc-850 hover:border-rose-900 transition-all cursor-pointer"
-                        title="Delete log permanently"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Detailed Log Entry View / Admin Editing Modal */}
-        {selectedBookingForDetails && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-            <div className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col gap-4 relative animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-              
-              {/* Header */}
-              <div className="flex justify-between items-start pb-3 border-b border-zinc-800">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">
-                    {isAdminEditing ? 'Modify Booking Log' : 'Pokkalo Booking Details'}
-                  </span>
-                  <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
-                    {isAdminEditing ? 'Editing Form' : selectedBookingForDetails.name}
-                  </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  {/* Admin Edit button */}
-                  {user?.role === 'admin' && (
-                    <button
-                      onClick={() => setIsAdminEditing(!isAdminEditing)}
-                      className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-                        isAdminEditing 
-                          ? 'bg-rose-500/10 border-rose-500 text-rose-455' 
-                          : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-white'
-                      }`}
-                      title={isAdminEditing ? 'Cancel Edit' : 'Edit Booking Log'}
-                    >
-                      {isAdminEditing ? <X size={13} /> : <Edit2 size={13} />}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setSelectedBookingForDetails(null);
-                      setIsAdminEditing(false);
-                    }}
-                    className="text-xs text-zinc-400 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              {/* READ-ONLY VIEW MODE */}
-              {!isAdminEditing ? (
-                <div className="flex flex-col gap-3 text-xs text-zinc-300">
+            {/* TAB VIEW 1: NEW GUEST BOOKING PORTAL */}
+            {activeTab === 'guest' && (
+              <>
+                {user.role === 'staff' ? (
                   
-                  {/* Logging Audit Info */}
-                  <div className="bg-zinc-955 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
-                      <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500 text-[10px] font-medium">Register Number</span>
-                      <span className="text-white font-bold">{selectedBookingForDetails.registerNumber || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500 text-[10px] font-medium">Branch Location</span>
-                      <span className="text-zinc-200 font-semibold text-sky-400">{selectedBookingForDetails.location || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500 text-[10px] font-medium">Log Date</span>
-                      <span className="text-zinc-400 text-[10px]">{new Date(selectedBookingForDetails.createdAt).toLocaleString()}</span>
-                    </div>
-                  </div>
-
-                  {/* Guest Details */}
-                  <div className="flex flex-col gap-1 pt-1">
-                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Channel</div>
-                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <div className="text-[9px] text-zinc-500">Guest Mobile</div>
-                          <div className="font-semibold text-white">{selectedBookingForDetails.mob}</div>
-                        </div>
-                        <div>
-                          <div className="text-[9px] text-zinc-500">Group Breakdown</div>
-                          <div className="font-semibold text-white">{selectedBookingForDetails.adults} Adults, {selectedBookingForDetails.children} Children</div>
-                        </div>
+                  /* Staff booking input form */
+                  <form onSubmit={handleSubmitBooking} className="flex flex-col gap-5">
+                    
+                    {/* Guest details */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                        <Users size={18} className="text-sky-400" />
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">1. Guest Details</h2>
                       </div>
-                      <div className="border-t border-zinc-855 pt-1.5 mt-1">
-                        <div className="text-[9px] text-zinc-500">Partner Channel</div>
-                        <div className="font-semibold text-white">
-                          {selectedBookingForDetails.partner} 
-                          {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Section Remarks */}
-                  {(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks || selectedBookingForDetails.staffRemarks) && (
-                    <div className="flex flex-col gap-1 pt-1">
-                      <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Log Section Remarks</div>
-                      <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
-                        {selectedBookingForDetails.guestRemarks && (
-                          <div>
-                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Guest Details</div>
-                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.guestRemarks}"</p>
-                          </div>
-                        )}
-                        {selectedBookingForDetails.serviceRemarks && (
-                          <div className={`${selectedBookingForDetails.guestRemarks ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
-                            <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Services & Addons</div>
-                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.serviceRemarks}"</p>
-                          </div>
-                        )}
-                        {selectedBookingForDetails.staffRemarks && (
-                          <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
-                            <div className="text-[8px] text-zinc-550 uppercase tracking-wide">Staff Roster</div>
-                            <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Staff Assignments */}
-                  <div className="flex flex-col gap-1">
-                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Staff Roster</div>
-                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <div className="text-[9px] text-zinc-500">Guides Assigned</div>
-                          <div className="font-semibold text-white">
-                            {Array.isArray(selectedBookingForDetails.guideStaff) 
-                              ? selectedBookingForDetails.guideStaff.join(', ') 
-                              : selectedBookingForDetails.guideStaff || 'N/A'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[9px] text-zinc-500">Assistants Assigned</div>
-                          <div className="font-semibold text-white">
-                            {Array.isArray(selectedBookingForDetails.assistStaff) 
-                              ? selectedBookingForDetails.assistStaff.join(', ') 
-                              : selectedBookingForDetails.assistStaff || 'None'}
-                          </div>
-                        </div>
-                      </div>
-                      {selectedBookingForDetails.driverStaff && (
-                        <div className="border-t border-zinc-855 pt-1.5">
-                          <div className="text-[9px] text-zinc-500">Boat Driver Staff</div>
-                          <div className="font-semibold text-white">{selectedBookingForDetails.driverStaff}</div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Selected Services & Addons */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Services Logs</div>
-                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
-                      <div>
-                        <span className="text-zinc-500 text-[10px]">Activities Roster:</span>
-                        <div className="flex flex-col gap-1 mt-1 pl-1">
-                          {selectedBookingForDetails.services.map((s, idx) => (
-                            <div key={idx} className="flex justify-between text-[10px] text-zinc-300">
-                              <span>&bull; {s.serviceName} (x{s.adults}A, {s.children}C)</span>
-                              <span className="font-semibold text-zinc-400">₹{s.rate}</span>
-                            </div>
+                      {/* Partner Select */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs text-zinc-400 font-medium">Partner Type</label>
+                        <div className="grid grid-cols-3 gap-1 bg-zinc-905 p-1 rounded-xl border border-zinc-850">
+                          {PARTNER_TYPES.map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setPartner(type)}
+                              className={`py-2 px-1 text-[10px] font-semibold rounded-lg transition-all ${
+                                partner === type 
+                                  ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10' 
+                                  : 'text-zinc-400 hover:text-zinc-200'
+                              }`}
+                            >
+                              {type}
+                            </button>
                           ))}
                         </div>
-                      </div>
-                      {selectedBookingForDetails.addons && selectedBookingForDetails.addons.length > 0 && (
-                        <div className="border-t border-zinc-850 pt-1.5 mt-1">
-                          <span className="text-zinc-500 text-[10px]">Add-ons:</span>
-                          <p className="font-semibold text-zinc-200">{selectedBookingForDetails.addons.join(', ')}</p>
-                          {selectedBookingForDetails.customPickupPrice !== undefined && selectedBookingForDetails.customPickupPrice > 0 && (
-                            <span className="text-[9px] text-zinc-400 block">&bull; Pickup cost: ₹{selectedBookingForDetails.customPickupPrice}</span>
-                          )}
-                          {selectedBookingForDetails.customFoodPrice !== undefined && selectedBookingForDetails.customFoodPrice > 0 && (
-                            <span className="text-[9px] text-zinc-400 block">&bull; Food cost: ₹{selectedBookingForDetails.customFoodPrice}</span>
-                          )}
-                          {selectedBookingForDetails.customRefreshmentPrice !== undefined && selectedBookingForDetails.customRefreshmentPrice > 0 && (
-                            <span className="text-[9px] text-zinc-400 block">&bull; Refreshments cost: ₹{selectedBookingForDetails.customRefreshmentPrice}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Pricing breakdown */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Financial Calculations</div>
-                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Base Price (Rate)</span>
-                        <span className="text-white font-medium">₹{selectedBookingForDetails.rate}</span>
-                      </div>
-                      <div className="flex justify-between text-zinc-400">
-                        <span>Upfront Advance</span>
-                        <span className="text-white font-medium">- ₹{selectedBookingForDetails.advance}</span>
-                      </div>
-                      {selectedBookingForDetails.advanceAccount && (
-                        <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
-                          <span>Advance Account</span>
-                          <span>{selectedBookingForDetails.advanceAccount}</span>
-                        </div>
-                      )}
-                      {selectedBookingForDetails.extraCharges !== undefined && selectedBookingForDetails.extraCharges > 0 && (
-                        <div className="flex justify-between text-zinc-400">
-                          <span>Extra Charges (Isolated)</span>
-                          <span className="text-amber-400 font-bold">₹{selectedBookingForDetails.extraCharges}</span>
-                        </div>
-                      )}
-                      {selectedBookingForDetails.discount > 0 && (
-                        <div className="flex justify-between text-zinc-400">
-                          <span>Discount Given</span>
-                          <span className="text-emerald-400 font-medium">- ₹{selectedBookingForDetails.discount}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-855 pt-1 mt-0.5">
-                        <span>Balance Due</span>
-                        <span>₹{selectedBookingForDetails.balance}</span>
-                      </div>
-                      {selectedBookingForDetails.balanceAccount && (
-                        <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
-                          <span>Balance Account</span>
-                          <span>{selectedBookingForDetails.balanceAccount}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-zinc-400 border-t border-zinc-855 pt-1.5 mt-1">
-                        <span>Agent Commission</span>
-                        <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
-                      </div>
-                      <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-855 pt-1 mt-0.5">
-                        <span>Total Bill (incl. Addons)</span>
-                        <span>₹{selectedBookingForDetails.total}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              ) : (
-                
-                /* ADMIN INLINE EDIT FORM */
-                <form onSubmit={handleSaveBookingEdits} className="flex flex-col gap-4 text-xs">
-                  
-                  {/* Guest Details */}
-                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">1. Edit Guest Info</span>
-                    
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-450 font-medium">Register Number</label>
-                      <input
-                        type="text"
-                        value={editRegisterNumber}
-                        onChange={(e) => setEditRegisterNumber(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                        required
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-450 font-medium">Partner Type</label>
-                      <select
-                        value={editPartner}
-                        onChange={(e) => setEditPartner(e.target.value as PartnerType)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                      >
-                        {PARTNER_TYPES.map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {(editPartner === 'Partner' || editPartner === 'Broker') && (
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-450 font-medium">{editPartner} Name</label>
-                        <input
-                          type="text"
-                          value={editPartnerName}
-                          onChange={(e) => setEditPartnerName(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                          required
-                        />
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-450 font-medium">Guest Name</label>
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                        required
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-450 font-medium">Guest Phone</label>
-                      <input
-                        type="tel"
-                        value={editMob}
-                        onChange={(e) => setEditMob(e.target.value.replace(/[^0-9+]/g, ''))}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                        required
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <EditableStepper
-                        label="Adults"
-                        value={editAdults}
-                        onChange={(val) => setEditAdults(val)}
-                        min={1}
-                      />
-                      <EditableStepper
-                        label="Children"
-                        value={editChildren}
-                        onChange={(val) => setEditChildren(val)}
-                        min={0}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Services Selection */}
-                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">2. Edit Services & Branch</span>
-                    
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-455 font-medium">Branch Location</label>
-                      <select
-                        value={editLocation}
-                        onChange={(e) => setEditLocation(e.target.value)}
-                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
-                        required
-                      >
-                        {locationsList.map(loc => (
-                          <option key={loc._id} value={loc.name}>{loc.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-2.5 mt-1">
-                      {editServiceRows.map((row, index) => {
-                        const match = prices.services.find(s => s.id === row.serviceId);
-                        const basePrice = match ? match.price : 0;
-                        const rowCost = (basePrice * row.adults) + (basePrice * row.children * 0.5);
-
-                        return (
-                          <div key={index} className="bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-850 flex flex-col gap-2 relative">
-                            <div className="flex justify-between items-center gap-1.5">
-                              <select
-                                value={row.serviceId}
-                                onChange={(e) => handleAdminServiceRowChange(index, 'serviceId', e.target.value)}
-                                className="bg-zinc-900 border border-zinc-800 rounded p-1 text-[10px] text-white w-full"
-                              >
-                                {prices.services.map(s => (
-                                  <option key={s.id} value={s.id}>{s.name} (₹{s.price})</option>
-                                ))}
-                              </select>
-                              {editServiceRows.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleAdminRemoveServiceRow(index)}
-                                  className="text-rose-500 p-1"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <EditableStepper
-                                label="Adults"
-                                value={row.adults}
-                                onChange={(v) => handleAdminServiceRowChange(index, 'adults', v)}
-                                min={0}
-                              />
-                              <EditableStepper
-                                label="Children"
-                                value={row.children}
-                                onChange={(v) => handleAdminServiceRowChange(index, 'children', v)}
-                                min={0}
-                              />
-                            </div>
-                            <div className="text-right text-[8px] text-zinc-500">
-                              Cost: ₹{rowCost}
-                            </div>
+                        {/* Partner Name input */}
+                        {(partner === 'Partner' || partner === 'Broker') && (
+                          <div className="flex flex-col gap-1.5 mt-3 animate-in slide-in-from-top-1 duration-155">
+                            <label htmlFor="staff-partner-name" className="text-xs text-zinc-455 font-semibold text-sky-405">
+                              {partner === 'Partner' ? 'Partner Name' : 'Broker Name'}
+                            </label>
+                            <input
+                              id="staff-partner-name"
+                              type="text"
+                              placeholder={`Enter name of ${partner.toLowerCase()}`}
+                              value={partnerName}
+                              onChange={(e) => setPartnerName(e.target.value)}
+                              className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500"
+                              required
+                            />
                           </div>
-                        );
-                      })}
-                      <button
-                        type="button"
-                        onClick={handleAdminAddServiceRow}
-                        className="py-1 border border-dashed border-sky-500/20 text-[10px] text-sky-400 hover:bg-zinc-900 rounded"
-                      >
-                        + Add Service
-                      </button>
-                    </div>
-
-                    {/* Addons editing */}
-                    <div className="flex flex-col gap-2 pt-2 border-t border-zinc-900">
-                      <label className="text-[10px] text-zinc-455 font-medium">Extra Add-ons</label>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {ADDONS.map(addon => {
-                          const isSel = editSelectedAddons.includes(addon.id);
-                          return (
-                            <button
-                              key={addon.id}
-                              type="button"
-                              onClick={() => toggleAdminEditAddon(addon.id)}
-                              className={`p-1.5 rounded text-[9px] font-bold border transition-all ${
-                                isSel ? 'bg-sky-500/10 border-sky-500 text-sky-400' : 'bg-zinc-900 border-zinc-850 text-zinc-550'
-                              }`}
-                            >
-                              {addon.name}
-                            </button>
-                          );
-                        })}
+                        )}
                       </div>
 
-                      {editSelectedAddons.includes('pickup-drop') && (
-                        <input
-                          type="number"
-                          placeholder="Pickup/Drop Price (₹)"
-                          value={editCustomPickupPrice}
-                          onChange={(e) => setEditCustomPickupPrice(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
-                          required
-                        />
-                      )}
-                      {editSelectedAddons.includes('food') && (
-                        <input
-                          type="number"
-                          placeholder="Food Price (₹)"
-                          value={editCustomFoodPrice}
-                          onChange={(e) => setEditCustomFoodPrice(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
-                          required
-                        />
-                      )}
-                      {editSelectedAddons.includes('refreshment') && (
-                        <input
-                          type="number"
-                          placeholder="Refreshment Price (₹)"
-                          value={editCustomRefreshmentPrice}
-                          onChange={(e) => setEditCustomRefreshmentPrice(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px] mt-1"
-                          required
-                        />
-                      )}
-                    </div>
-                  </div>
+                      {/* Guest Name input */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="staff-name" className="text-xs text-zinc-400 font-medium">Guest Name</label>
+                        <div className="relative">
+                          <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                          <input
+                            id="staff-name"
+                            type="text"
+                            placeholder=""
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-505 transition-colors"
+                            required
+                          />
+                        </div>
+                      </div>
 
-                  {/* Staff Assigned */}
-                  <div className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">3. Edit Staff Roster</span>
-                    
-                    {/* Admin Multi-Select Guide tag list */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-400 font-semibold">Guides Assigned</label>
-                      <div className="flex flex-wrap gap-1 mt-1 bg-zinc-900 p-2 rounded-lg border border-zinc-850">
-                        {staffNamesList.map(name => {
-                          const isSel = editGuideStaff.includes(name);
-                          return (
-                            <button
-                              key={name}
-                              type="button"
-                              onClick={() => handleAdminToggleGuide(name)}
-                              className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${
-                                isSel ? 'bg-sky-500 text-zinc-950 border-sky-500' : 'bg-zinc-950 border-zinc-900 text-zinc-400'
-                              }`}
-                            >
-                              {name}
-                            </button>
-                          );
-                        })}
+                      {/* Mobile / Steppers Row */}
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <label htmlFor="staff-mob" className="text-xs text-zinc-400 font-medium">Guest Mob</label>
+                          <div className="relative">
+                            <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                            <input
+                              id="staff-mob"
+                              type="tel"
+                              placeholder=""
+                              value={mob}
+                              onChange={(e) => setMob(e.target.value.replace(/[^0-9+]/g, ''))}
+                              className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        {/* Main Guest Counter Steppers */}
+                        <div className="grid grid-cols-2 gap-3 pt-1">
+                          <EditableStepper
+                            label="Guest Adults (Compulsory)"
+                            value={guestAdults}
+                            onChange={(val) => setGuestAdults(val)}
+                            min={1}
+                          />
+                          <EditableStepper
+                            label="Guest Children"
+                            value={guestChildren}
+                            onChange={(val) => setGuestChildren(val)}
+                            min={0}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Section Remarks: Guest Details */}
+                      <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                        <label htmlFor="staff-guest-remarks" className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                          <MessageSquare size={10} />
+                          <span>Remarks (Guest Details)</span>
+                        </label>
+                        <input
+                          id="staff-guest-remarks"
+                          type="text"
+                          placeholder="Remarks regarding guest profiles..."
+                          value={guestRemarks}
+                          onChange={(e) => setGuestRemarks(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
+                        />
                       </div>
                     </div>
 
-                    {/* Admin Multi-Select Assist tag list */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] text-zinc-400 font-semibold">Assistants Assigned</label>
-                      <div className="flex flex-wrap gap-1 mt-1 bg-zinc-900 p-2 rounded-lg border border-zinc-850">
-                        {staffNamesList.map(name => {
-                          const isSel = editAssistStaff.includes(name);
-                          return (
-                            <button
-                              key={name}
-                              type="button"
-                              onClick={() => handleAdminToggleAssist(name)}
-                              className={`px-2 py-1 rounded text-[9px] font-bold border transition-all ${
-                                isSel ? 'bg-sky-500 text-zinc-950 border-sky-500' : 'bg-zinc-950 border-zinc-900 text-zinc-400'
-                              }`}
-                            >
-                              {name}
-                            </button>
-                          );
-                        })}
+                    {/* Section 2: Services selection */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                        <Layers size={18} className="text-sky-400" />
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">2. Services Selection</h2>
                       </div>
-                    </div>
 
-                    {editShowDriverOption && (
-                      <div className="flex flex-col gap-1 mt-1">
-                        <label className="text-[10px] text-zinc-405 font-medium flex items-center justify-between">
-                          <span>Driver Staff</span>
-                          {editIsDriverCompulsory && (
-                            <span className="text-[7px] text-rose-500 font-bold">(Compulsory)</span>
-                          )}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="staff-location-select" className="text-xs text-zinc-400 font-medium flex items-center gap-1">
+                          <MapPin size={12} className="text-sky-400" />
+                          <span>Select Branch Location</span>
                         </label>
                         <select
-                          value={editDriverStaff}
-                          onChange={(e) => setEditDriverStaff(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1.5 text-xs text-white"
-                          required={editIsDriverCompulsory}
+                          id="staff-location-select"
+                          value={selectedLocation}
+                          onChange={(e) => setSelectedLocation(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                          required
                         >
-                          <option value="">-- Select Driver --</option>
-                          {staffNamesList.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
+                          {locationsList.length === 0 ? (
+                            <option value="">No locations available - Contact Admin</option>
+                          ) : (
+                            locationsList.map((loc) => (
+                              <option key={loc._id} value={loc.name}>
+                                {loc.name}
+                              </option>
+                            ))
+                          )}
                         </select>
                       </div>
-                    )}
-                  </div>
 
-                  {/* Financial & Accounts */}
-                  <div className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">4. Edit Payments</span>
+                      {/* Services rows lists */}
+                      <div className="flex flex-col gap-4 pt-2 border-t border-zinc-850">
+                        <label className="text-xs text-zinc-400 font-medium">Add Services</label>
+                        {serviceRows.map((row, index) => {
+                          const match = prices.services.find(s => s.id === row.serviceId);
+                          const basePrice = match ? match.price : 0;
+                          const computedRate = (basePrice * row.adults) + (basePrice * row.children * 0.5);
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-455 font-medium">Rate (Base)</label>
-                        <input
-                          type="number"
-                          value={editRate}
-                          readOnly
-                          className="bg-zinc-900/50 border border-zinc-900 rounded p-1 text-zinc-450"
-                        />
+                          return (
+                            <div key={index} className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3 relative">
+                              <div className="flex justify-between items-center gap-2">
+                                <select
+                                  value={row.serviceId}
+                                  onChange={(e) => handleServiceRowChange(index, 'serviceId', e.target.value)}
+                                  className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white w-full"
+                                >
+                                  {prices.services.map((s) => (
+                                    <option key={s.id} value={s.id}>{s.name} (₹{s.price})</option>
+                                  ))}
+                                </select>
+                                {serviceRows.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveServiceRow(index)}
+                                    className="p-2 bg-zinc-900 hover:bg-rose-955/35 text-rose-500 rounded-lg border border-zinc-850"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <EditableStepper
+                                  label="Adults"
+                                  value={row.adults}
+                                  onChange={(val) => handleServiceRowChange(index, 'adults', val)}
+                                  min={0}
+                                />
+                                <EditableStepper
+                                  label="Children (50%)"
+                                  value={row.children}
+                                  onChange={(val) => handleServiceRowChange(index, 'children', val)}
+                                  min={0}
+                                />
+                              </div>
+                              <div className="text-right text-[10px] text-zinc-550">
+                                Row Cost: <span className="font-bold text-sky-400">₹{computedRate}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <button
+                          type="button"
+                          onClick={handleAddServiceRow}
+                          className="w-full py-2 bg-zinc-900 text-sky-400 text-xs font-bold rounded-xl border border-dashed border-zinc-850 hover:bg-zinc-850"
+                        >
+                          + Add Service Row
+                        </button>
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-455 font-medium">Discount</label>
-                        <input
-                          type="number"
-                          value={editDiscount}
-                          onChange={(e) => setEditDiscount(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1"
-                        />
+                      {/* Addons Grid */}
+                      <div className="flex flex-col gap-2 pt-2 border-t border-zinc-850">
+                        <label className="text-xs text-zinc-400 font-medium">Extra Add-ons</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {ADDONS.map((addon) => {
+                            const isSelected = selectedAddons.includes(addon.id);
+                            const IconComponent = addon.icon;
+                            return (
+                              <button
+                                key={addon.id}
+                                type="button"
+                                onClick={() => toggleAddon(addon.id)}
+                                className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all text-center ${
+                                  isSelected
+                                    ? 'bg-sky-500/10 border-sky-500 text-sky-300'
+                                    : 'bg-zinc-900 border-zinc-850 text-zinc-400'
+                                }`}
+                              >
+                                <IconComponent size={15} />
+                                <span className="text-[9px] font-bold">{addon.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {selectedAddons.includes('pickup-drop') && (
+                          <input
+                            type="number"
+                            placeholder="Pickup/Drop Price (₹)"
+                            value={customPickupPrice}
+                            onChange={(e) => setCustomPickupPrice(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs w-full"
+                            required
+                          />
+                        )}
+                        {selectedAddons.includes('food') && (
+                          <input
+                            type="number"
+                            placeholder="Food Price (₹)"
+                            value={customFoodPrice}
+                            onChange={(e) => setCustomFoodPrice(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs w-full"
+                            required
+                          />
+                        )}
+                        {selectedAddons.includes('refreshment') && (
+                          <input
+                            type="number"
+                            placeholder="Refreshment Price (₹)"
+                            value={customRefreshmentPrice}
+                            onChange={(e) => setCustomRefreshmentPrice(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs w-full"
+                            required
+                          />
+                        )}
                       </div>
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-455 font-medium">Extra Charges</label>
+                      {/* Remarks Services */}
+                      <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                        <label htmlFor="staff-service-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
+                          <MessageSquare size={10} />
+                          <span>Remarks (Services & Add-ons)</span>
+                        </label>
                         <input
-                          type="number"
-                          value={editExtraCharges}
-                          onChange={(e) => setEditExtraCharges(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1"
+                          id="staff-service-remarks"
+                          type="text"
+                          placeholder="Remarks regarding selected packages..."
+                          value={serviceRemarks}
+                          onChange={(e) => setServiceRemarks(e.target.value)}
+                          className="w-full bg-zinc-955 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
                         />
                       </div>
+                    </div>
 
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] text-zinc-455 font-medium">Commission</label>
-                        <input
-                          type="number"
-                          value={editCommission}
-                          onChange={(e) => setEditCommission(e.target.value)}
-                          disabled={editPartner === 'Walk-In'}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 disabled:opacity-40"
-                        />
+                    {/* Staff Assigned */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                        <Briefcase size={18} className="text-sky-400" />
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Staff Assigned</h2>
+                      </div>
+                      
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
+                            <span>Guide Staff (Select Multiple)</span>
+                            <span className="text-[8px] text-rose-500 font-bold uppercase tracking-wider">(Compulsory)</span>
+                          </label>
+                          <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-950 p-2 rounded-xl border border-zinc-900">
+                            {staffNamesList.map(name => {
+                              const isSelected = guideStaff.includes(name);
+                              return (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  onClick={() => handleToggleGuide(name)}
+                                  className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                                    isSelected 
+                                      ? 'bg-sky-500 text-zinc-955 border-sky-500 shadow-md shadow-sky-500/10' 
+                                      : 'bg-zinc-900 border-zinc-850 text-zinc-405 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  {name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-1 mt-1">
+                          <label className="text-xs text-zinc-400 font-semibold flex items-center justify-between">
+                            <span>Assist Staff (Select Multiple)</span>
+                            <span className="text-[8px] text-zinc-550 font-bold uppercase tracking-wider">(Optional)</span>
+                          </label>
+                          <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-955 p-2 rounded-xl border border-zinc-900">
+                            {staffNamesList.map(name => {
+                              const isSelected = assistStaff.includes(name);
+                              return (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  onClick={() => handleToggleAssist(name)}
+                                  className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                                    isSelected 
+                                      ? 'bg-sky-500 text-zinc-955 border-sky-505 shadow-md shadow-sky-500/10' 
+                                      : 'bg-zinc-900 border-zinc-850 text-zinc-405 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  {name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {showDriverOption && (
+                          <div className="flex flex-col gap-1.5 mt-1">
+                            <label className="text-xs text-zinc-400 font-semibold">
+                              <span>Boat Driver Staff</span>
+                              {isDriverCompulsory && <span className="text-[8px] text-rose-500 ml-1">(Compulsory)</span>}
+                            </label>
+                            <select
+                              value={driverStaff}
+                              onChange={(e) => setDriverStaff(e.target.value)}
+                              className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white"
+                              required={isDriverCompulsory}
+                            >
+                              <option value="">-- Select Driver --</option>
+                              {staffNamesList.map(n => (
+                                <option key={n} value={n}>{n}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
-                        <label className="text-[10px] text-zinc-455 font-medium">Advance Paid</label>
+                      {/* Remarks Staff */}
+                      <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-zinc-800/60">
+                        <label htmlFor="staff-assigned-remarks" className="text-[10px] text-zinc-550 font-medium flex items-center gap-1">
+                          <MessageSquare size={10} />
+                          <span>Remarks (Staff Assigned)</span>
+                        </label>
                         <input
-                          type="number"
-                          value={editAdvance}
-                          onChange={(e) => setEditAdvance(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 w-full"
+                          id="staff-assigned-remarks"
+                          type="text"
+                          placeholder="Remarks regarding docking crews..."
+                          value={staffRemarks}
+                          onChange={(e) => setStaffRemarks(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-sky-505"
                         />
                       </div>
+                    </div>
 
-                      {editAdvanceVal > 0 && (
-                        <div className="flex flex-col gap-1 col-span-2">
-                          <label className="text-[10px] text-sky-400 font-semibold uppercase">Advance Paid Account</label>
+                    {/* Section 3: Payment Details */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                        <DollarSign size={18} className="text-sky-400" />
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">3. Payment Details</h2>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5 col-span-2">
+                          <label className="text-xs text-zinc-400 font-medium">Rate (Base)</label>
+                          <input
+                            type="number"
+                            value={rate}
+                            readOnly
+                            className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 pl-3 text-xs text-zinc-350 font-bold"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
+                          <label className="text-xs text-zinc-400 font-medium">Advance Paid</label>
+                          <input
+                            type="number"
+                            value={advance}
+                            onChange={(e) => setAdvance(e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white"
+                          />
+                        </div>
+
+                        {advanceVal > 0 && (
+                          <div className="flex flex-col gap-1.5 col-span-2">
+                            <label className="text-[10px] text-sky-400 font-semibold uppercase">Advance Paid Account</label>
+                            <select
+                              value={advanceAccount}
+                              onChange={(e) => setAdvanceAccount(e.target.value)}
+                              className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white"
+                              required
+                            >
+                              <option value="">-- Select --</option>
+                              {staffNamesList.map(n => (
+                                <option key={n} value={n}>{n}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs text-zinc-400 font-medium">Extra Charges</label>
+                          <input
+                            type="number"
+                            value={extraCharges}
+                            onChange={(e) => setExtraCharges(e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-xs text-zinc-400 font-medium">Discount</label>
+                          <input
+                            type="number"
+                            value={discount}
+                            onChange={(e) => setDiscount(e.target.value)}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
+                          <label className="text-xs text-zinc-400 font-medium">Commission</label>
+                          <input
+                            type="number"
+                            value={commission}
+                            onChange={(e) => setCommission(e.target.value)}
+                            disabled={partner === 'Walk-In'}
+                            className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white disabled:opacity-40"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 col-span-2 border-t border-zinc-850 pt-2">
+                          <label className="text-xs text-zinc-400 font-medium">Balance Due</label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={balanceVal}
+                            className="w-full bg-zinc-955 border border-zinc-900 rounded-xl py-2 px-3 text-xs text-amber-400 font-bold"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5 col-span-2">
+                          <label className="text-[10px] text-sky-400 font-semibold uppercase">Balance Paid Account</label>
                           <select
-                            value={editAdvanceAccount}
-                            onChange={(e) => setEditAdvanceAccount(e.target.value)}
-                            className="bg-zinc-900 border border-zinc-850 rounded p-1 text-xs text-white"
+                            value={balanceAccount}
+                            onChange={(e) => setBalanceAccount(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
                             required
                           >
                             <option value="">-- Select --</option>
-                            {staffNamesList.map(name => (
-                              <option key={name} value={name}>{name}</option>
+                            {staffNamesList.map(n => (
+                              <option key={n} value={n}>{n}</option>
                             ))}
                           </select>
                         </div>
-                      )}
+                      </div>
 
-                      <div className="flex flex-col gap-1 col-span-2 border-t border-zinc-900 pt-2">
-                        <label className="text-[10px] text-zinc-455 font-medium">Balance Due Readout</label>
+                      <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-3 flex justify-between items-center mt-2">
+                        <span className="text-[10px] text-sky-400 font-bold uppercase">Total Bill</span>
+                        <span className="text-lg font-black text-white">₹{totalVal}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSubmitting ? <Loader2 size={15} className="animate-spin" /> : <span>Submit Booking</span>}
+                    </button>
+                  </form>
+                ) : (
+                  
+                  /* Admin Registry Logs & Configuration */
+                  <div className="flex flex-col gap-5 animate-in fade-in duration-200">
+                    {/* Admin Pricing / staff configurations */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
+                      <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
+                        <span className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1">
+                          <TrendingUp size={14} className="text-emerald-400" />
+                          <span>Club Booking Registry</span>
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleExportToExcel}
+                            className="text-[9px] text-amber-500 hover:text-amber-400 font-bold flex items-center gap-1 bg-zinc-900 px-2.5 py-1 rounded border border-zinc-800"
+                          >
+                            <Download size={10} />
+                            <span>Export Logs</span>
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={fetchBookings} 
+                            className="text-[9px] text-sky-400 font-bold"
+                          >
+                            Sync
+                          </button>
+                        </div>
+                      </div>
+
+                      {isLoadingBookings ? (
+                        <div className="py-6 text-center text-zinc-550 text-xs flex items-center justify-center gap-1.5">
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Syncing bookings data...</span>
+                        </div>
+                      ) : bookings.length === 0 ? (
+                        <div className="py-6 text-center text-zinc-555 text-xs">No entries submitted.</div>
+                      ) : (
+                        <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
+                          {bookings.map((booking) => (
+                            <div 
+                              key={booking._id}
+                              className="bg-zinc-950 border border-zinc-900 rounded-lg p-2.5 flex flex-col gap-1 text-[10px] relative hover:border-zinc-805 transition-colors"
+                            >
+                              <div 
+                                onClick={() => handleOpenDetailedModal(booking)}
+                                className="cursor-pointer flex flex-col gap-1 pr-6"
+                              >
+                                <div className="flex justify-between items-start">
+                                  <span className="font-bold text-zinc-200">{booking.name} ({booking.registerNumber || 'N/A'})</span>
+                                  <span className="font-black text-emerald-400">₹{booking.total}</span>
+                                </div>
+                                <div className="text-[9px] text-zinc-400 leading-tight">
+                                  <strong>Services:</strong> {booking.services.map(s => `${s.serviceName} (x${s.adults}A, ${s.children}C)`).join(', ')}
+                                </div>
+                                <div className="grid grid-cols-2 gap-x-2 text-[8px] text-zinc-500 border-t border-zinc-900/60 pt-1 mt-1 font-semibold">
+                                  <span>Guides: {Array.isArray(booking.guideStaff) ? booking.guideStaff.join(', ') : booking.guideStaff}</span>
+                                  <span className="text-right text-sky-400">Location: {booking.location}</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBooking(booking._id, booking.name)}
+                                className="absolute right-2 top-2 p-1.5 bg-zinc-900 hover:bg-rose-955 text-rose-500 hover:text-white rounded-md border border-zinc-850 cursor-pointer"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Manage Location Branches */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                        <MapPin size={16} className="text-sky-400" />
+                        <span>Manage Locations (Branches)</span>
+                      </h3>
+
+                      <form onSubmit={handleCreateLocation} className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
                         <input
+                          type="text"
+                          placeholder="Location / Branch Name (e.g. Varkala)"
+                          value={newLocationName}
+                          onChange={(e) => setNewLocationName(e.target.value)}
+                          className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white focus:border-sky-500 focus:outline-none"
+                          required
+                        />
+                        <button
+                          type="submit"
+                          className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+                        >
+                          + Add Location Branch
+                        </button>
+                      </form>
+
+                      {locationsList.length > 0 && (
+                        <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
+                          {locationsList.map((loc) => (
+                            <div key={loc._id} className="bg-zinc-900/60 rounded-lg py-1.5 px-2.5 flex justify-between items-center text-xs border border-zinc-850">
+                              <span className="font-semibold text-zinc-200">{loc.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLocation(loc._id, loc.name)}
+                                className="text-rose-500"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Customize Services Prices */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                        <DollarSign size={16} className="text-amber-500" />
+                        <span>Customize Prices</span>
+                      </h3>
+                      
+                      <form onSubmit={handleSavePrices} className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                          {priceFormServices.map((srv, idx) => (
+                            <div key={idx} className="bg-zinc-955 p-2.5 rounded-xl border border-zinc-900 flex items-center gap-2">
+                              <input
+                                type="text"
+                                placeholder="Service Name"
+                                value={srv.name}
+                                onChange={(e) => handleAdminServiceChange(idx, 'name', e.target.value)}
+                                className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white w-full"
+                                required
+                              />
+                              <input
+                                type="number"
+                                placeholder="Price"
+                                value={srv.price}
+                                onChange={(e) => handleAdminServiceChange(idx, 'price', parseInt(e.target.value) || 0)}
+                                className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2 text-xs text-white w-20 text-center"
+                                required
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAdminDeleteService(idx)}
+                                className="p-1.5 bg-zinc-900 hover:bg-rose-955 text-rose-500 rounded border border-zinc-850"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleAdminAddService}
+                          className="w-full py-2 bg-zinc-900 text-sky-400 text-xs font-bold rounded-xl border border-dashed border-zinc-850"
+                        >
+                          + Add Custom Service
+                        </button>
+
+                        <button
+                          type="submit"
+                          disabled={adminLoading}
+                          className="w-full bg-amber-500 hover:bg-amber-405 text-zinc-955 font-bold py-2.5 rounded-xl text-xs"
+                        >
+                          {adminLoading ? 'Saving...' : 'Save Customizable Prices'}
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Manage Staff Accounts */}
+                    <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1">
+                        <Briefcase size={14} className="text-sky-400" />
+                        <span>Manage Staff Accounts</span>
+                      </h3>
+
+                      <form onSubmit={handleCreateStaff} className="bg-zinc-955 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2.5">
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Username"
+                            value={newStaffUser}
+                            onChange={(e) => setNewStaffUser(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white"
+                            required
+                          />
+                          <input
+                            type="password"
+                            placeholder="Password"
+                            value={newStaffPassword}
+                            onChange={(e) => setNewStaffPassword(e.target.value)}
+                            className="bg-zinc-900 border border-zinc-850 rounded-lg py-1.5 px-2.5 text-xs text-white"
+                            required
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-1.5 rounded-lg text-xs"
+                        >
+                          Create Staff Account
+                        </button>
+                      </form>
+
+                      {staffList.length > 0 && (
+                        <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto">
+                          {staffList.map((member) => (
+                            <div key={member._id} className="bg-zinc-900/60 rounded-lg py-1.5 px-2.5 flex justify-between items-center text-xs border border-zinc-850">
+                              <span className="font-semibold text-zinc-200">{member.username}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteStaff(member.username)}
+                                className="text-rose-500"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* TAB VIEW 2: EXPENSES LOG TABLE & ENTRY FORM */}
+            {activeTab === 'expenses' && (
+              <div className="flex flex-col gap-5 animate-in fade-in duration-200">
+                
+                {/* Expense Entry Form */}
+                <div className="glass-panel p-4 rounded-2xl flex flex-col gap-4">
+                  <div className="flex items-center gap-2 pb-2 border-b border-zinc-800">
+                    <DollarSign size={18} className="text-sky-400" />
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Log New Expense</h2>
+                  </div>
+
+                  <form onSubmit={handleSubmitExpense} className="flex flex-col gap-4">
+                    
+                    {/* Expense Date */}
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="exp-date" className="text-xs text-zinc-400 font-medium">Expense Date</label>
+                      <input
+                        id="exp-date"
+                        type="date"
+                        value={expenseDate}
+                        onChange={(e) => setExpenseDate(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505 w-full"
+                        required
+                      />
+                    </div>
+
+                    {/* Expense Category Type */}
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="exp-category" className="text-xs text-zinc-400 font-medium">Type of Expense</label>
+                      <select
+                        id="exp-category"
+                        value={expenseType}
+                        onChange={(e) => setExpenseType(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                        required
+                      >
+                        <option value="Fuel">Fuel</option>
+                        <option value="Salaries / Wages">Salaries / Wages</option>
+                        <option value="Boat Maintenance & Repairs">Boat Maintenance & Repairs</option>
+                        <option value="Rent / Lease">Rent / Lease</option>
+                        <option value="Food & Staff Refreshments">Food & Staff Refreshments</option>
+                        <option value="Office & Dock Supplies">Office & Dock Supplies</option>
+                        <option value="Electricity & Utility Bills">Electricity & Utility Bills</option>
+                        <option value="Others / Miscellaneous">Others / Miscellaneous</option>
+                      </select>
+                    </div>
+
+                    {/* Paid Amount */}
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="exp-amount" className="text-xs text-zinc-400 font-medium">Paid Amount (₹)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-550 text-xs">₹</span>
+                        <input
+                          id="exp-amount"
                           type="number"
-                          value={editBalanceVal}
-                          readOnly
-                          className="bg-zinc-900/50 border border-zinc-900 rounded p-1 text-amber-500 font-semibold"
+                          placeholder="Amount in Rupees"
+                          value={expenseAmount}
+                          onChange={(e) => setExpenseAmount(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 pl-8 pr-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                          required
                         />
                       </div>
+                    </div>
 
-                      <div className="flex flex-col gap-1 col-span-2">
-                        <label className="text-[10px] text-sky-455 font-semibold uppercase">Balance Paid Account</label>
-                        <select
-                          value={editBalanceAccount}
-                          onChange={(e) => setEditBalanceAccount(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded p-1 text-xs text-white"
-                          required
-                        >
-                          <option value="">-- Select --</option>
-                          {staffNamesList.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
-                        </select>
+                    {/* Cash / Gpay Mode Selector */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs text-zinc-400 font-medium">Payment Mode</label>
+                      <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-850">
+                        {(['Cash', 'Gpay'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setExpenseMode(mode)}
+                            className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                              expenseMode === mode
+                                ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10'
+                                : 'text-zinc-400 hover:text-zinc-200'
+                            }`}
+                          >
+                            {mode}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
-                    <div className="bg-sky-500/10 border border-sky-500/25 p-2 rounded-lg flex justify-between items-center mt-2">
-                      <span className="text-[9px] text-sky-400 font-bold uppercase">Total Bill</span>
-                      <span className="text-sm font-black text-white">₹{editTotalVal}</span>
+                    {/* File Attachment Proof - Resizes client side automatically */}
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="exp-file" className="text-xs text-zinc-400 font-medium">Bill / Gpay Screenshot Proof</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          id="exp-file"
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageFileChange}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="py-2.5 px-4 bg-zinc-900 border border-zinc-850 hover:bg-zinc-850 rounded-xl text-xs font-bold text-zinc-300 flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <ImageIcon size={14} className="text-sky-400" />
+                          <span>Choose Receipt Image</span>
+                        </button>
+                        
+                        {expenseScreenshot && (
+                          <div className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={expenseScreenshot}
+                              alt="Thumbnail preview"
+                              className="w-10 h-10 rounded-lg object-cover border border-zinc-800 cursor-pointer"
+                              onClick={() => setPreviewImageSrc(expenseScreenshot)}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setExpenseScreenshot('')}
+                              className="absolute -top-1.5 -right-1.5 bg-rose-500 text-zinc-950 p-0.5 rounded-full cursor-pointer hover:bg-rose-400"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[8px] text-zinc-550 leading-relaxed font-mono block">Images are auto-resized client-side to keep DB storage footprint lightweight.</span>
                     </div>
-                  </div>
 
-                  {/* Remarks */}
-                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-2">
-                    <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">5. Edit Remarks</span>
+                    {/* Remarks */}
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="exp-remarks" className="text-xs text-zinc-400 font-medium">Remarks</label>
+                      <input
+                        id="exp-remarks"
+                        type="text"
+                        placeholder="Add details regarding this expense..."
+                        value={expenseRemarks}
+                        onChange={(e) => setExpenseRemarks(e.target.value)}
+                        className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-3.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer mt-2"
+                    >
+                      {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : <span>Log Expense</span>}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Expenses Log Table Roster (Six Columns + User Column) */}
+                <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3 max-w-full overflow-hidden">
+                  <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Expenses Registry</h3>
+                      {user.role === 'admin' && (
+                        <span className="text-[9px] text-zinc-500">Expenses Gross: <strong className="text-rose-455">₹{totalExpenseSum}</strong></span>
+                      )}
+                    </div>
                     
-                    <input
-                      type="text"
-                      placeholder="Guest Details Remarks"
-                      value={editGuestRemarks}
-                      onChange={(e) => setEditGuestRemarks(e.target.value)}
-                      className="bg-zinc-900 border border-zinc-850 rounded p-1"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Service Details Remarks"
-                      value={editServiceRemarks}
-                      onChange={(e) => setEditServiceRemarks(e.target.value)}
-                      className="bg-zinc-900 border border-zinc-850 rounded p-1 mt-1"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Staff Assigned Remarks"
-                      value={editStaffRemarks}
-                      onChange={(e) => setEditStaffRemarks(e.target.value)}
-                      className="bg-zinc-900 border border-zinc-850 rounded p-1 mt-1"
-                    />
+                    {user.role === 'admin' && (
+                      <button
+                        type="button"
+                        onClick={handleExportExpensesToExcel}
+                        className="text-[9px] text-amber-500 hover:text-amber-400 font-bold flex items-center gap-1 bg-zinc-900 px-2.5 py-1 rounded border border-zinc-800"
+                      >
+                        <Download size={10} />
+                        <span>Export Expenses</span>
+                      </button>
+                    )}
                   </div>
 
-                  {/* Submit updates */}
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3 bg-sky-500 text-zinc-950 hover:bg-sky-400 text-xs font-black rounded-xl shadow-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Save size={13} />
-                    )}
-                    <span>Save Updates</span>
-                  </button>
+                  {isLoadingExpenses ? (
+                    <div className="py-6 text-center text-zinc-550 text-xs flex items-center justify-center gap-1.5">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Loading expenses roster...</span>
+                    </div>
+                  ) : expenses.length === 0 ? (
+                    <div className="py-6 text-center text-zinc-655 text-xs">No expenses logged.</div>
+                  ) : (
+                    <div className="w-full overflow-x-auto select-none rounded-xl border border-zinc-900">
+                      <table className="w-full text-left border-collapse text-[10px]">
+                        <thead>
+                          <tr className="bg-zinc-950 text-zinc-400 border-b border-zinc-900">
+                            <th className="p-2 font-bold whitespace-nowrap">Date</th>
+                            <th className="p-2 font-bold whitespace-nowrap">Type of expense</th>
+                            <th className="p-2 font-bold whitespace-nowrap">Paid Amount</th>
+                            <th className="p-2 font-bold whitespace-nowrap">Cash/Gpay</th>
+                            <th className="p-2 font-bold whitespace-nowrap">Bill/Gpay screenshot</th>
+                            <th className="p-2 font-bold whitespace-nowrap">Remarks</th>
+                            <th className="p-2 font-bold whitespace-nowrap">User</th>
+                            {user.role === 'admin' && <th className="p-2 font-bold text-center">Action</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-900 bg-zinc-900/20">
+                          {expenses.map((exp) => (
+                            <tr key={exp._id} className="hover:bg-zinc-900/40 text-zinc-300">
+                              <td className="p-2 whitespace-nowrap font-medium">{exp.date}</td>
+                              <td className="p-2 whitespace-nowrap">{exp.type}</td>
+                              <td className="p-2 whitespace-nowrap text-rose-400 font-bold">₹{exp.amount}</td>
+                              <td className="p-2 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 rounded text-[8px] font-black ${
+                                  exp.paymentMode === 'Cash' 
+                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                                    : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                }`}>
+                                  {exp.paymentMode}
+                                </span>
+                              </td>
+                              <td className="p-2 whitespace-nowrap">
+                                {exp.screenshot ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewImageSrc(exp.screenshot || null)}
+                                    className="text-[9px] text-sky-400 hover:text-sky-305 underline font-bold"
+                                  >
+                                    View Proof
+                                  </button>
+                                ) : (
+                                  <span className="text-zinc-600 italic">No Proof</span>
+                                )}
+                              </td>
+                              <td className="p-2 whitespace-nowrap truncate max-w-[120px]" title={exp.remarks}>
+                                {exp.remarks || '-'}
+                              </td>
+                              <td className="p-2 whitespace-nowrap font-semibold text-zinc-400">{exp.entryUser}</td>
+                              {user.role === 'admin' && (
+                                <td className="p-2 whitespace-nowrap text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteExpense(exp._id)}
+                                    className="text-rose-500 hover:text-rose-400 p-1"
+                                    title="Delete expense entry"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
 
-                </form>
-              )}
+              </div>
+            )}
 
-            </div>
           </div>
         )}
-
-        {/* Dynamic attribution footer */}
-        <footer className="mt-auto pt-8 pb-4 text-center">
-          <p className="text-[9px] text-zinc-655 opacity-40 hover:opacity-100 transition-opacity font-semibold">
-            Pokkalo Kayaking Club &copy; {new Date().getFullYear()} &bull; Made by Alvin Ben George
-          </p>
-        </footer>
 
       </main>
     </div>
