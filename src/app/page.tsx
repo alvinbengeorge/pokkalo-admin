@@ -198,7 +198,7 @@ export default function BookingPortal() {
 
   // EXPENSE ENTRY FORM STATES
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [expenseType, setExpenseType] = useState('Fuel');
+  const [expenseType, setExpenseType] = useState('');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseMode, setExpenseMode] = useState<'Cash' | 'Gpay'>('Cash');
   const [expenseScreenshot, setExpenseScreenshot] = useState('');
@@ -2237,22 +2237,15 @@ export default function BookingPortal() {
                       {/* Expense Category Type */}
                       <div className="flex flex-col gap-1.5">
                         <label htmlFor="exp-category" className="text-xs text-zinc-400 font-medium">Type of Expense</label>
-                        <select
+                        <input
                           id="exp-category"
+                          type="text"
+                          placeholder="e.g. Fuel, Boat repairs, Salaries..."
                           value={expenseType}
                           onChange={(e) => setExpenseType(e.target.value)}
-                          className="bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-500 w-full"
+                          className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
                           required
-                        >
-                          <option value="Fuel">Fuel</option>
-                          <option value="Salaries / Wages">Salaries / Wages</option>
-                          <option value="Boat Maintenance & Repairs">Boat Maintenance & Repairs</option>
-                          <option value="Rent / Lease">Rent / Lease</option>
-                          <option value="Food & Staff Refreshments">Food & Staff Refreshments</option>
-                          <option value="Office & Dock Supplies">Office & Dock Supplies</option>
-                          <option value="Electricity & Utility Bills">Electricity & Utility Bills</option>
-                          <option value="Others / Miscellaneous">Others / Miscellaneous</option>
-                        </select>
+                        />
                       </div>
 
                       {/* Paid Amount */}
