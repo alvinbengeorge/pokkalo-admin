@@ -52,6 +52,63 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, date, type, amount, paymentMode, screenshot, remarks } = body;
+
+    if (!id || !date || !type || !amount || !paymentMode) {
+      return NextResponse.json(
+        { error: 'Missing required expense parameters (ID, Date, Type, Amount, Payment Mode)' },
+        { status: 400 }
+      );
+    }
+
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return NextResponse.json(
+        { error: 'Paid Amount must be a positive number' },
+        { status: 400 }
+      );
+    }
+
+    const client = await clientPromise;
+    const db = client.db(process.env.MONGODB_DB || 'kayak_club');
+
+    const updateDoc = {
+      $set: {
+        date,
+        type,
+        amount: parsedAmount,
+        paymentMode,
+        screenshot: screenshot || '',
+        remarks: remarks || '',
+        updatedAt: new Date(),
+      }
+    };
+
+    const result = await db.collection('expenses').updateOne(
+      { _id: new ObjectId(id) },
+      updateDoc
+    );
+
+    if (result.matchedCount === 0) {
+      return NextResponse.json({ error: 'Expense record not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Expense details updated successfully!',
+    });
+  } catch (error: any) {
+    console.error('Update expense error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update expense', details: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function GET() {
   try {
     const client = await clientPromise;

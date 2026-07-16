@@ -206,6 +206,15 @@ export default function BookingPortal() {
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [isLoadingExpenses, setIsLoadingExpenses] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Admin Expense Edit States
+  const [selectedExpenseForEdit, setSelectedExpenseForEdit] = useState<ExpenseRecord | null>(null);
+  const [editExpenseDate, setEditExpenseDate] = useState('');
+  const [editExpenseType, setEditExpenseType] = useState('');
+  const [editExpenseAmount, setEditExpenseAmount] = useState('');
+  const [editExpenseMode, setEditExpenseMode] = useState<'Cash' | 'Gpay'>('Cash');
+  const [editExpenseScreenshot, setEditExpenseScreenshot] = useState('');
+  const [editExpenseRemarks, setEditExpenseRemarks] = useState('');
+  const editExpenseFileInputRef = useRef<HTMLInputElement>(null);
 
   // Preview modals
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
@@ -1275,6 +1284,99 @@ export default function BookingPortal() {
     } catch (err) {
       console.error(err);
       showToast('error', 'Connection error logging expense.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Admin Expense edit handlers
+  const handleOpenExpenseEditModal = (expense: ExpenseRecord) => {
+    setSelectedExpenseForEdit(expense);
+    setEditExpenseDate(expense.date);
+    setEditExpenseType(expense.type);
+    setEditExpenseAmount(expense.amount.toString());
+    setEditExpenseMode(expense.paymentMode);
+    setEditExpenseScreenshot(expense.screenshot || '');
+    setEditExpenseRemarks(expense.remarks || '');
+  };
+
+  const handleEditExpenseScreenshotChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setEditExpenseScreenshot(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveExpenseEdits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedExpenseForEdit) return;
+
+    if (!editExpenseAmount || parseFloat(editExpenseAmount) <= 0) {
+      showToast('error', 'Paid Amount must be a positive number');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const payload = {
+      id: selectedExpenseForEdit._id,
+      date: editExpenseDate,
+      type: editExpenseType,
+      amount: parseFloat(editExpenseAmount),
+      paymentMode: editExpenseMode,
+      screenshot: editExpenseScreenshot,
+      remarks: editExpenseRemarks,
+    };
+
+    try {
+      const response = await fetch('/api/expenses', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        showToast('success', 'Expense record updated successfully!');
+        setSelectedExpenseForEdit(null);
+        fetchExpenses();
+      } else {
+        showToast('error', result.error || 'Failed to update expense');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Connection error updating expense log.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2430,7 +2532,15 @@ export default function BookingPortal() {
                               </td>
                               <td className="p-2 whitespace-nowrap font-semibold text-zinc-400">{exp.entryUser}</td>
                               {user.role === 'admin' && (
-                                <td className="p-2 whitespace-nowrap text-center">
+                                <td className="p-2 whitespace-nowrap text-center flex justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenExpenseEditModal(exp)}
+                                    className="text-sky-400 hover:text-sky-300 p-1"
+                                    title="Edit expense entry"
+                                  >
+                                    <Edit2 size={11} />
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteExpense(exp._id)}
@@ -2456,6 +2566,783 @@ export default function BookingPortal() {
         )}
 
       </main>
+
+      {/* Modal: Detailed Log Entry View / Admin Editing Modal */}
+      {selectedBookingForDetails && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col gap-4 relative animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex justify-between items-start pb-3 border-b border-zinc-800">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">
+                  {isAdminEditing ? 'Modify Booking Log' : 'Pokkalo Booking Details'}
+                </span>
+                <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
+                  {isAdminEditing ? 'Editing Form' : selectedBookingForDetails.name}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {user?.role === 'admin' && (
+                  <button
+                    onClick={() => setIsAdminEditing(!isAdminEditing)}
+                    className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                      isAdminEditing 
+                        ? 'bg-rose-500/10 border-rose-500 text-rose-455' 
+                        : 'bg-zinc-900 border-zinc-850 text-zinc-400 hover:text-white'
+                    }`}
+                    title={isAdminEditing ? 'Cancel Edit' : 'Edit Booking Log'}
+                  >
+                    {isAdminEditing ? <X size={13} /> : <Edit2 size={13} />}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setSelectedBookingForDetails(null);
+                    setIsAdminEditing(false);
+                  }}
+                  className="text-xs text-zinc-400 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {/* Read-Only View */}
+            {!isAdminEditing ? (
+              <div className="flex flex-col gap-3 text-xs text-zinc-300">
+                <div className="bg-zinc-950 border border-zinc-900 p-2.5 rounded-xl flex flex-col gap-1">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[10px] font-medium">Logged By</span>
+                    <span className="text-zinc-200 font-semibold">{selectedBookingForDetails.entryUser}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[10px] font-medium">Register Number</span>
+                    <span className="text-white font-bold">{selectedBookingForDetails.registerNumber || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[10px] font-medium">Branch Location</span>
+                    <span className="text-sky-400 font-semibold">{selectedBookingForDetails.location || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500 text-[10px] font-medium">Log Date</span>
+                    <span className="text-zinc-400 text-[10px]">{new Date(selectedBookingForDetails.createdAt).toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 pt-1">
+                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Guest & Channel</div>
+                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[9px] text-zinc-500">Guest Mobile</div>
+                        <div className="font-semibold text-white">{selectedBookingForDetails.mob}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-zinc-500">Group Breakdown</div>
+                        <div className="font-semibold text-white">{selectedBookingForDetails.adults} Adults, {selectedBookingForDetails.children} Children</div>
+                      </div>
+                    </div>
+                    <div className="border-t border-zinc-855 pt-1.5 mt-1">
+                      <div className="text-[9px] text-zinc-500">Partner Channel</div>
+                      <div className="font-semibold text-white">
+                        {selectedBookingForDetails.partner} 
+                        {selectedBookingForDetails.partnerName && ` (${selectedBookingForDetails.partnerName})`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks || selectedBookingForDetails.staffRemarks) && (
+                  <div className="flex flex-col gap-1 pt-1">
+                    <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Log Section Remarks</div>
+                    <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
+                      {selectedBookingForDetails.guestRemarks && (
+                        <div>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Guest Details</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.guestRemarks}"</p>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.serviceRemarks && (
+                        <div className={`${selectedBookingForDetails.guestRemarks ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Services & Addons</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.serviceRemarks}"</p>
+                        </div>
+                      )}
+                      {selectedBookingForDetails.staffRemarks && (
+                        <div className={`${(selectedBookingForDetails.guestRemarks || selectedBookingForDetails.serviceRemarks) ? 'border-t border-zinc-850 pt-1.5' : ''}`}>
+                          <div className="text-[8px] text-zinc-500 uppercase tracking-wide">Staff Roster</div>
+                          <p className="text-zinc-200 text-[10px] italic">"{selectedBookingForDetails.staffRemarks}"</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1">
+                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Staff Roster</div>
+                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[9px] text-zinc-500">Guide Assigned</div>
+                        <div className="font-semibold text-white">{Array.isArray(selectedBookingForDetails.guideStaff) ? selectedBookingForDetails.guideStaff.join(', ') : selectedBookingForDetails.guideStaff || 'N/A'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-zinc-500">Assist Assigned</div>
+                        <div className="font-semibold text-white">{Array.isArray(selectedBookingForDetails.assistStaff) ? selectedBookingForDetails.assistStaff.join(', ') : selectedBookingForDetails.assistStaff || 'N/A'}</div>
+                      </div>
+                    </div>
+                    {selectedBookingForDetails.driverStaff && (
+                      <div className="border-t border-zinc-855 pt-1.5">
+                        <div className="text-[9px] text-zinc-500">Boat Driver Staff</div>
+                        <div className="font-semibold text-white">{selectedBookingForDetails.driverStaff}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Services Logs</div>
+                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-2">
+                    <div>
+                      <span className="text-zinc-500 text-[10px]">Activities Roster:</span>
+                      <div className="flex flex-col gap-1 mt-1 pl-1">
+                        {selectedBookingForDetails.services.map((s, idx) => (
+                          <div key={idx} className="flex justify-between text-[10px] text-zinc-300">
+                            <span>&bull; {s.serviceName} (x{s.adults}A, {s.children}C)</span>
+                            <span className="font-semibold text-zinc-400">₹{s.rate}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {selectedBookingForDetails.addons && selectedBookingForDetails.addons.length > 0 && (
+                      <div className="border-t border-zinc-850 pt-1.5 mt-1">
+                        <span className="text-zinc-550 text-[10px]">Add-ons:</span>
+                        <p className="font-semibold text-zinc-200">{selectedBookingForDetails.addons.join(', ')}</p>
+                        {selectedBookingForDetails.customPickupPrice !== undefined && selectedBookingForDetails.customPickupPrice > 0 && (
+                          <span className="text-[9px] text-zinc-400 block">&bull; Pickup cost: ₹{selectedBookingForDetails.customPickupPrice}</span>
+                        )}
+                        {selectedBookingForDetails.customFoodPrice !== undefined && selectedBookingForDetails.customFoodPrice > 0 && (
+                          <span className="text-[9px] text-zinc-400 block">&bull; Food cost: ₹{selectedBookingForDetails.customFoodPrice}</span>
+                        )}
+                        {selectedBookingForDetails.customRefreshmentPrice !== undefined && selectedBookingForDetails.customRefreshmentPrice > 0 && (
+                          <span className="text-[9px] text-zinc-400 block">&bull; Refreshments cost: ₹{selectedBookingForDetails.customRefreshmentPrice}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider">Financial Calculations</div>
+                  <div className="bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-850/60 flex flex-col gap-1.5">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Base Price (Rate)</span>
+                      <span className="text-white font-medium">₹{selectedBookingForDetails.rate}</span>
+                    </div>
+                    <div className="flex justify-between text-zinc-400">
+                      <span>Upfront Advance</span>
+                      <span className="text-white font-medium">- ₹{selectedBookingForDetails.advance}</span>
+                    </div>
+                    {selectedBookingForDetails.advanceAccount && (
+                      <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
+                        <span>Advance Account</span>
+                        <span>{selectedBookingForDetails.advanceAccount}</span>
+                      </div>
+                    )}
+                    {selectedBookingForDetails.extraCharges !== undefined && selectedBookingForDetails.extraCharges > 0 && (
+                      <div className="flex justify-between text-zinc-400">
+                        <span>Extra Charges</span>
+                        <span className="text-amber-400 font-bold">₹{selectedBookingForDetails.extraCharges}</span>
+                      </div>
+                    )}
+                    {selectedBookingForDetails.discount > 0 && (
+                      <div className="flex justify-between text-zinc-400">
+                        <span>Discount Given</span>
+                        <span className="text-emerald-400 font-medium">- ₹{selectedBookingForDetails.discount}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-amber-500 font-semibold border-t border-zinc-855 pt-1 mt-0.5">
+                      <span>Balance Due</span>
+                      <span>₹{selectedBookingForDetails.balance}</span>
+                    </div>
+                    {selectedBookingForDetails.balanceAccount && (
+                      <div className="flex justify-between text-[9px] text-zinc-500 pl-2">
+                        <span>Balance Account</span>
+                        <span>{selectedBookingForDetails.balanceAccount}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-zinc-400 border-t border-zinc-855 pt-1.5 mt-1">
+                      <span>Agent Commission</span>
+                      <span className="text-white font-medium">₹{selectedBookingForDetails.commission}</span>
+                    </div>
+                    <div className="flex justify-between text-sky-400 font-bold border-t border-zinc-855 pt-1 mt-0.5">
+                      <span>Total Bill (incl. Addons)</span>
+                      <span>₹{selectedBookingForDetails.total}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Admin Edit Form inside details modal */
+              <form onSubmit={handleSaveBookingEdits} className="flex flex-col gap-4 text-xs">
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">1. Guest Info</span>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Register Number</label>
+                    <input
+                      type="text"
+                      value={editRegisterNumber}
+                      onChange={(e) => setEditRegisterNumber(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400 font-medium">Partner Type</label>
+                    <select
+                      value={editPartner}
+                      onChange={(e) => setEditPartner(e.target.value as PartnerType)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white focus:outline-none"
+                    >
+                      {PARTNER_TYPES.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {(editPartner === 'Partner' || editPartner === 'Broker') && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-zinc-400">{editPartner} Name</label>
+                      <input
+                        type="text"
+                        value={editPartnerName}
+                        onChange={(e) => setEditPartnerName(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required
+                      />
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Guest Name</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Guest Phone</label>
+                    <input
+                      type="tel"
+                      value={editMob}
+                      onChange={(e) => setEditMob(e.target.value.replace(/[^0-9+]/g, ''))}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <EditableStepper
+                      label="Adults"
+                      value={editAdults}
+                      onChange={(val) => setEditAdults(val)}
+                      min={1}
+                    />
+                    <EditableStepper
+                      label="Children"
+                      value={editChildren}
+                      onChange={(val) => setEditChildren(val)}
+                      min={0}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="text-[10px] text-zinc-400">Remarks (Guest)</label>
+                    <input
+                      type="text"
+                      value={editGuestRemarks}
+                      onChange={(e) => setEditGuestRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      placeholder="Remarks..."
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">2. Services & Location</span>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Branch Location</label>
+                    <select
+                      value={editLocation}
+                      onChange={(e) => setEditLocation(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      required
+                    >
+                      {locationsList.map(loc => (
+                        <option key={loc._id} value={loc.name}>{loc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2 mt-1">
+                    {editServiceRows.map((row, idx) => {
+                      const match = prices.services.find(s => s.id === row.serviceId);
+                      const basePrice = match ? match.price : 0;
+                      const cost = (basePrice * row.adults) + (basePrice * row.children * 0.5);
+                      return (
+                        <div key={idx} className="bg-zinc-900 p-2.5 rounded-xl border border-zinc-850 flex flex-col gap-2 relative">
+                          <div className="flex justify-between items-center gap-2">
+                            <select
+                              value={row.serviceId}
+                              onChange={(e) => handleAdminServiceRowChange(idx, 'serviceId', e.target.value)}
+                              className="bg-zinc-900 border border-zinc-800 rounded p-1 text-[10px] text-white w-full"
+                            >
+                              {prices.services.map(s => (
+                                <option key={s.id} value={s.id}>{s.name} (₹{s.price})</option>
+                              ))}
+                            </select>
+                            {editServiceRows.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleAdminRemoveServiceRow(idx)}
+                                className="text-rose-500 p-1"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <EditableStepper
+                              label="Adults"
+                              value={row.adults}
+                              onChange={(v) => handleAdminServiceRowChange(idx, 'adults', v)}
+                              min={0}
+                            />
+                            <EditableStepper
+                              label="Children"
+                              value={row.children}
+                              onChange={(v) => handleAdminServiceRowChange(idx, 'children', v)}
+                              min={0}
+                            />
+                          </div>
+                          <div className="text-right text-[8px] text-zinc-500">Cost: ₹{cost}</div>
+                        </div>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={handleAdminAddServiceRow}
+                      className="py-1.5 border border-dashed border-sky-500/20 text-[10px] text-sky-400 hover:bg-zinc-900 rounded"
+                    >
+                      + Add Service
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-2 pt-2 border-t border-zinc-900">
+                    <label className="text-[10px] text-zinc-400">Add-ons</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {ADDONS.map(ad => {
+                        const isS = editSelectedAddons.includes(ad.id);
+                        return (
+                          <button
+                            key={ad.id}
+                            type="button"
+                            onClick={() => toggleAdminEditAddon(ad.id)}
+                            className={`p-1.5 rounded text-[9px] font-bold border transition-all ${
+                              isS ? 'bg-sky-500/10 border-sky-500 text-sky-400' : 'bg-zinc-900 border-zinc-850 text-zinc-550'
+                            }`}
+                          >
+                            {ad.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {editSelectedAddons.includes('pickup-drop') && (
+                      <input
+                        type="number"
+                        placeholder="Pickup Cost"
+                        value={editCustomPickupPrice}
+                        onChange={(e) => setEditCustomPickupPrice(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px]"
+                        required
+                      />
+                    )}
+                    {editSelectedAddons.includes('food') && (
+                      <input
+                        type="number"
+                        placeholder="Food Cost"
+                        value={editCustomFoodPrice}
+                        onChange={(e) => setEditCustomFoodPrice(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px]"
+                        required
+                      />
+                    )}
+                    {editSelectedAddons.includes('refreshment') && (
+                      <input
+                        type="number"
+                        placeholder="Refreshment Cost"
+                        value={editCustomRefreshmentPrice}
+                        onChange={(e) => setEditCustomRefreshmentPrice(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded p-1 text-[10px]"
+                        required
+                      />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="text-[10px] text-zinc-400">Remarks (Services)</label>
+                    <input
+                      type="text"
+                      value={editServiceRemarks}
+                      onChange={(e) => setEditServiceRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      placeholder="Remarks..."
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">3. Staff Roster</span>
+                  
+                  {/* MULTISELECT CHECKS FOR GUIDES */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Guides (Multiple)</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-900 p-2.5 rounded-xl border border-zinc-855">
+                      {staffNamesList.map(nm => {
+                        const isSel = editGuideStaff.includes(nm);
+                        return (
+                          <button
+                            key={nm}
+                            type="button"
+                            onClick={() => {
+                              if (isSel) {
+                                setEditGuideStaff(editGuideStaff.filter(g => g !== nm));
+                              } else {
+                                setEditGuideStaff([...editGuideStaff, nm]);
+                              }
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                              isSel ? 'bg-sky-500 text-zinc-950 border-sky-500 shadow-sm' : 'bg-zinc-950 border-zinc-850 text-zinc-400 hover:text-zinc-200'
+                            }`}
+                          >
+                            {nm}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* MULTISELECT CHECKS FOR ASSISTANTS */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-zinc-400">Assistants (Multiple)</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1 bg-zinc-900 p-2.5 rounded-xl border border-zinc-855">
+                      {staffNamesList.map(nm => {
+                        const isSel = editAssistStaff.includes(nm);
+                        return (
+                          <button
+                            key={nm}
+                            type="button"
+                            onClick={() => {
+                              if (isSel) {
+                                setEditAssistStaff(editAssistStaff.filter(a => a !== nm));
+                              } else {
+                                setEditAssistStaff([...editAssistStaff, nm]);
+                              }
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                              isSel ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm' : 'bg-zinc-955 border-zinc-850 text-zinc-400 hover:text-zinc-200'
+                            }`}
+                          >
+                            {nm}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {editShowDriverOption && (
+                    <div className="flex flex-col gap-1 mt-1">
+                      <label className="text-[10px] text-zinc-400">Driver Staff {editIsDriverCompulsory && <span className="text-rose-500">*</span>}</label>
+                      <select
+                        value={editDriverStaff}
+                        onChange={(e) => setEditDriverStaff(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                        required={editIsDriverCompulsory}
+                      >
+                        <option value="">-- Choose Driver --</option>
+                        {staffNamesList.map(nm => (
+                          <option key={nm} value={nm}>{nm}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1 mt-1">
+                    <label className="text-[10px] text-zinc-400">Remarks (Staff)</label>
+                    <input
+                      type="text"
+                      value={editStaffRemarks}
+                      onChange={(e) => setEditStaffRemarks(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-850 rounded-lg p-1.5 text-white"
+                      placeholder="Remarks..."
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-900 flex flex-col gap-3">
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">4. Pricing & Payments</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-zinc-400">Base Price</label>
+                      <input
+                        type="number"
+                        value={editRate}
+                        readOnly
+                        className="bg-zinc-900 border border-zinc-800 rounded p-1 text-zinc-400"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-zinc-400">Discount</label>
+                      <input
+                        type="number"
+                        value={editDiscount}
+                        onChange={(e) => setEditDiscount(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded p-1 text-white"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-zinc-400">Extra Charges</label>
+                      <input
+                        type="number"
+                        value={editExtraCharges}
+                        onChange={(e) => setEditExtraCharges(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded p-1 text-white"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-zinc-400">Commission</label>
+                      <input
+                        type="number"
+                        value={editCommission}
+                        onChange={(e) => setEditCommission(e.target.value)}
+                        disabled={editPartner === 'Walk-In'}
+                        className="bg-zinc-900 border border-zinc-800 rounded p-1 text-white disabled:opacity-40"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1 border-t border-zinc-900 pt-2.5">
+                    <label className="text-[9px] text-zinc-400">Advance Amount</label>
+                    <input
+                      type="number"
+                      value={editAdvance}
+                      onChange={(e) => setEditAdvance(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-800 rounded p-1 text-white"
+                    />
+                  </div>
+                  {editAdvanceVal > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] text-zinc-400">Advance Account</label>
+                      <select
+                        value={editAdvanceAccount}
+                        onChange={(e) => setEditAdvanceAccount(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded p-1 text-xs text-white"
+                        required
+                      >
+                        <option value="">-- Choose Account --</option>
+                        {staffNamesList.map(nm => (
+                          <option key={nm} value={nm}>{nm}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1 border-t border-zinc-900 pt-2.5">
+                    <label className="text-[9px] text-zinc-400">Balance Account *</label>
+                    <select
+                      value={editBalanceAccount}
+                      onChange={(e) => setEditBalanceAccount(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-800 rounded p-1 text-xs text-white"
+                      required
+                    >
+                      <option value="">-- Choose Account --</option>
+                      {staffNamesList.map(nm => (
+                        <option key={nm} value={nm}>{nm}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="text-[10px] text-zinc-400 border-t border-zinc-900 pt-2 flex flex-col gap-1 font-mono">
+                    <div className="flex justify-between">
+                      <span>Total Calculated:</span>
+                      <span className="font-bold text-sky-400">₹{editTotalVal}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Balance Due:</span>
+                      <span className="font-bold text-amber-500">₹{Math.max(0, editTotalVal - editAdvanceVal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full bg-emerald-500 hover:bg-emerald-450 disabled:bg-zinc-800 text-zinc-950 font-bold py-3.5 rounded-2xl text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer mt-2"
+                >
+                  {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : 'Save Booking Updates'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Expense Entry (Admin Only) */}
+      {selectedExpenseForEdit && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-sm rounded-3xl p-5 flex flex-col gap-4 relative animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex justify-between items-start pb-3 border-b border-zinc-800">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider font-mono">
+                  Modify Expense details
+                </span>
+                <h3 className="text-sm font-bold text-white truncate max-w-[200px]">
+                  Edit Expense
+                </h3>
+              </div>
+              <button
+                onClick={() => setSelectedExpenseForEdit(null)}
+                className="text-xs text-zinc-400 hover:text-white font-semibold py-1 px-2 bg-zinc-900 border border-zinc-850 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExpenseEdits} className="flex flex-col gap-4 text-xs">
+              {/* Date */}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="edit-exp-date" className="text-xs text-zinc-400 font-medium">Expense Date</label>
+                <input
+                  id="edit-exp-date"
+                  type="date"
+                  value={editExpenseDate}
+                  onChange={(e) => setEditExpenseDate(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                  required
+                />
+              </div>
+
+              {/* Category / Type */}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="edit-exp-category" className="text-xs text-zinc-400 font-medium">Type of Expense</label>
+                <input
+                  id="edit-exp-category"
+                  type="text"
+                  placeholder="e.g. Fuel, Boat repairs, Salaries..."
+                  value={editExpenseType}
+                  onChange={(e) => setEditExpenseType(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                  required
+                />
+              </div>
+
+              {/* Amount */}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="edit-exp-amount" className="text-xs text-zinc-400 font-medium">Paid Amount (₹)</label>
+                <input
+                  id="edit-exp-amount"
+                  type="number"
+                  placeholder="0.00"
+                  value={editExpenseAmount}
+                  onChange={(e) => setEditExpenseAmount(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-850 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                  required
+                />
+              </div>
+
+              {/* Cash/Gpay */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-zinc-400 font-medium">Payment Mode</label>
+                <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1.5 rounded-xl border border-zinc-900">
+                  {(['Cash', 'Gpay'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setEditExpenseMode(mode)}
+                      className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                        editExpenseMode === mode
+                          ? 'bg-sky-500 text-zinc-950 shadow-md shadow-sky-500/10'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Screenshot File Upload */}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="edit-exp-file" className="text-xs text-zinc-400 font-medium">Bill / Gpay Screenshot Proof</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="edit-exp-file"
+                    ref={editExpenseFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleEditExpenseScreenshotChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => editExpenseFileInputRef.current?.click()}
+                    className="py-2.5 px-4 bg-zinc-900 border border-zinc-850 hover:bg-zinc-855 rounded-xl text-xs font-bold text-zinc-300 flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <ImageIcon size={14} className="text-sky-400" />
+                    <span>Choose Receipt Image</span>
+                  </button>
+
+                  {editExpenseScreenshot && (
+                    <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={editExpenseScreenshot}
+                        alt="Thumbnail preview"
+                        className="w-10 h-10 rounded-lg object-cover border border-zinc-800 cursor-pointer"
+                        onClick={() => setPreviewImageSrc(editExpenseScreenshot)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditExpenseScreenshot('')}
+                        className="absolute -top-1.5 -right-1.5 bg-rose-500 text-zinc-955 p-0.5 rounded-full cursor-pointer hover:bg-rose-455"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="edit-exp-remarks" className="text-xs text-zinc-400 font-medium">Remarks</label>
+                <input
+                  id="edit-exp-remarks"
+                  type="text"
+                  placeholder="Add details regarding this expense..."
+                  value={editExpenseRemarks}
+                  onChange={(e) => setEditExpenseRemarks(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-855 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-sky-505"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full bg-sky-500 hover:bg-sky-405 text-zinc-955 font-bold py-3.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer mt-2"
+              >
+                {isSubmitting ? <Loader2 size={13} className="animate-spin" /> : <span>Save Updates</span>}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal image preview overlay */}
     </div>
   );
 }
